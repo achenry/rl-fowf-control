@@ -12,7 +12,9 @@ def step_wind_field(wind_speed_mean, wind_dir_mean, wind_speed_TI, wind_dir_TI):
 	return ws, wd
 
 class FOWFEnv(gym.Env):
-	def __init__(self, floris_input_file="./example_input_9turb.json", turbine_layout_std=1.,
+	def __init__(self,
+				 floris_input_file="./9turb_floris_input.json",
+				 turbine_layout_std=1.,
 				 offline_probability=0.001):
 		# TODO use gym's Discrete object for action space
 		self.action_space = {
@@ -37,15 +39,19 @@ class FOWFEnv(gym.Env):
 		self.offline_probability = offline_probability
 
 		self.floris_input_file = floris_input_file
-		self.wind_farm = None
+		self.wind_farm = wfct.floris_interface.FlorisInterface(self.floris_input_file)
+		self.n_turbines = len(self.wind_farm.floris.farm.turbines)
 
-		self.mean_layout = [(turbine_coords.x1, turbine_coords.x3) for turbine_coords in self.wind_farm.floris.farm.turbine_map.coords]
+		self.mean_layout = [(turbine_coords.x1, turbine_coords.x2) for turbine_coords in self.wind_farm.floris.farm.turbine_map.coords]
 		self.var_layout = turbine_layout_std**2 * np.eye(2) # for x and y coordinate
 
 	def reset(self, init_action, init_disturbance):
 
-		new_layout = [np.random.multivariate_normal(self.mean_layout[t_idx], self.var_layout) for t_idx in range(len(self.wind_farm.turbines))]
-		new_online_bools = [np.random.choice([0, 1], p=[self.offline_probability, 1 - self.offline_probability]) for t_idx in range(len(self.wind_farm.turbines))]
+		new_layout = np.vstack([np.random.multivariate_normal(self.mean_layout[t_idx], self.var_layout)
+					  for t_idx in range(self.n_turbines)]).T
+
+		new_online_bools = [np.random.choice([0, 1], p=[self.offline_probability, 1 - self.offline_probability])
+							for t_idx in range(self.n_turbines)]
 
 		# initialize at steady-state
 		self.wind_farm = wfct.floris_interface.FlorisInterface(self.floris_input_file)
@@ -60,10 +66,14 @@ class FOWFEnv(gym.Env):
 
 
 		self.episode_time_step = 0
-		self.current_observation = {'layout': [],
-									'ax_ind_factors': [],
-									'yaw_angles': [],
-									'online_bool': []}
+
+		self.current_observation = {'layout':
+										[[turbine.coords.x1 for turbine in self.wind_farm.floris.farm.turbine_map],
+										 [turbine.coords.x2 for turbine in self.wind_farm.floris.farm.turbine_map]],
+									'ax_ind_factors': [turbine.aI for turbine in self.wind_farm.floris.farm.turbines],
+									'yaw_angles': [turbine.yaw_angle for turbine in self.wind_farm.floris.farm.turbines],
+									'online_bool': new_online_bools}
+
 		return self.current_observation
 
 	def step(self, action, disturbance):
@@ -78,13 +88,13 @@ class FOWFEnv(gym.Env):
 
 
 		# Make list of turbine x, y coordinates samples from Gaussian distributions
-		new_layout = [np.random.multivariate_normal(self.mean_layout[t_idx], self.var_layout) for t_idx in
-					  range(len(self.wind_farm.turbines))]
+		new_layout = np.vstack([np.random.multivariate_normal(self.mean_layout[t_idx], self.var_layout)
+								for t_idx in range(self.n_turbines)]).T
 
 		# Make list of turbine online/offline booleans, offline with some small probability p,
 		# if a turbine is offline, set its axial induction factor to 0
-		new_online_bools = [np.random.choice([0, 1], p=[self.offline_probability, 1 - self.offline_probability]) for
-							t_idx in range(len(self.wind_farm.turbines))]
+		new_online_bools = [np.random.choice([0, 1], p=[self.offline_probability, 1 - self.offline_probability])
+							for t_idx in range(self.n_turbines)]
 
 		self.wind_farm.floris.farm.flow_field.mean_wind_speed = disturbance['wind_speed']
 		self.wind_farm.reinitialize_flow_field(wind_speed=disturbance['wind_speed'],
