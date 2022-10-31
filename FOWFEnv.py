@@ -3,6 +3,7 @@ from gym.spaces import MultiBinary
 from ray.rllib.algorithms.qmix import QMixConfig
 import numpy as np
 from floridyn import tools as wfct
+from gym import spaces
 
 DT = 1.0  # discrete-time step for wind farm control
 EPISODE_LEN = int(10 * 60 // DT)  # 10 minute episode length
@@ -35,18 +36,29 @@ class FOWFEnv(gym.Env):
                  offline_probability=0.001):
         # TODO use gym's Discrete object for action space
         self.action_space = {
+            'ax_ind_factor_set': spaces.Discrete(3),
+            'yaw_angle_set': spaces.Discrete(7)
+        
+        self._action_space = {
             'ax_ind_factor_set': [0.11, 0.22, 0.33],
             'yaw_angle_set': [-15, -10, -5, 0, 5, 10, 15]
         }
-
+            
         self.state_space = {
+            'layout': spaces.Box(0, 2, shape=(2,), dtype=int),
+            'ax_ind_factor_set': spaces.Discrete(3),
+            'yaw_angle_set': spaces.Discrete(7),
+            'online_bool': spaces.MultiBinary([3, 3])
+
+        self._state_space = {
             'layout': [],
             'ax_ind_factors_actual': [],
             'yaw_angles_actual': [],
             'online_bool': []
         }
 
-        self.observation_space = self.state_space
+        self.observation_space = self.state_space.copy()
+        self._observation_space = self._state_space.copy()
 
         self.current_observation = {'layout': [],
                                     'ax_ind_factors': [],
@@ -90,14 +102,14 @@ class FOWFEnv(gym.Env):
                     new_online_bools)])
 
         self.episode_time_step = 0
-        self.current_observation = {'layout':
-                                    np.array([[turbine.coords.x1 for turbine in self.wind_farm.floris.farm.turbine_map.turbines],
-                                     [turbine.coords.x2 for turbine in self.wind_farm.floris.farm.turbine_map.turbines]]),
+        xs = [t.x1 for t in self.wind_farm.floris.farm.turbine_map.coords]
+        ys = [t.x2 for t in self.wind_farm.floris.farm.turbine_map.coords]
+        self.current_observation = {'layout': np.array([xs, ys]),
                                     'ax_ind_factors': np.array([turbine.aI for turbine in self.wind_farm.floris.farm.turbines]),
                                     'yaw_angles': np.array([turbine.yaw_angle for turbine in self.wind_farm.floris.farm.turbines]),
                                     'online_bool': np.array(new_online_bools)}
-        for obs in self.current_observation:
-            self.current_observation[obs] *= self.current_observation['online_bool']
+        #for obs in self.current_observation:
+        #    self.current_observation[obs] *= self.current_observation['online_bool']
 
         return self.current_observation
 
@@ -137,17 +149,19 @@ class FOWFEnv(gym.Env):
             sim_time=self.episode_time_step)
 
         reward = self.wind_farm.get_farm_power()
-        # for i, turbine in enumerate(fi.floris.farm.turbines):
-        #       turbine_powers[i].append(turbine.power / 1e6)
 
         # Set `done` flag after EPISODE_LEN steps.
         self.episode_time_step += 1
         done = self.episode_time_step >= EPISODE_LEN
-
+        axial_induction=[
+                a * online_bool for a,
+                online_bool in zip(
+                    action['ax_ind_factor_set'],
+                    new_online_bools)]
         # Update observation
-        self.current_observation = {'layout': [],
-                                    'ax_ind_factors': [],
-                                    'yaw_angles': [],
-                                    'online_bool': []}
+        self.current_observation = {'layout': new_layout,
+                                    'ax_ind_factors': axial_induction,
+                                    'yaw_angles': action["yaw_angle_set"],
+                                    'online_bool': new_online_bools}
 
         return self.current_observation, reward, done

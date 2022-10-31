@@ -17,6 +17,5 @@ if __name__ == '__main__':
         'wind_dir': 270
     }
 
-    import pdb
-    pdb.set_trace()
+
     fowf_env.reset(init_action, init_disturbance)
