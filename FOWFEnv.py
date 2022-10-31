@@ -35,13 +35,28 @@ class FOWFEnv(gym.Env):
                  turbine_layout_std=1.,
                  offline_probability=0.001):
         # TODO use gym's Discrete object for action space
+        
+        self.episode_time_step = None
+        self.offline_probability = offline_probability
+
+        self.floris_input_file = floris_input_file
+        self.wind_farm = wfct.floris_interface.FlorisInterface(
+            self.floris_input_file)
+        self.n_turbines = len(self.wind_farm.floris.farm.turbines)
+
+        self.mean_layout = [(turbine_coords.x1, turbine_coords.x2)
+                            for turbine_coords in self.wind_farm.floris.farm.turbine_map.coords]
+        self.var_layout = turbine_layout_std**2 * \
+            np.eye(2)  # for x and y coordinate
+        
         self.action_space = {
             'ax_ind_factor_set': spaces.Discrete(3),
             'yaw_angle_set': spaces.Discrete(7)
+        }
         
         self._action_space = {
-            'ax_ind_factor_set': [0.11, 0.22, 0.33],
-            'yaw_angle_set': [-15, -10, -5, 0, 5, 10, 15]
+            'ax_ind_factor_set': np.array([0.11, 0.22, 0.33]*self.n_turbines),
+            'yaw_angle_set': np.array([-15, -10, -5, 0, 5, 10, 15]*self.n_turbines)
         }
             
         self.state_space = {
@@ -49,7 +64,8 @@ class FOWFEnv(gym.Env):
             'ax_ind_factor_set': spaces.Discrete(3),
             'yaw_angle_set': spaces.Discrete(7),
             'online_bool': spaces.MultiBinary([3, 3])
-
+        }
+            
         self._state_space = {
             'layout': [],
             'ax_ind_factors_actual': [],
@@ -64,19 +80,13 @@ class FOWFEnv(gym.Env):
                                     'ax_ind_factors': [],
                                     'yaw_angles': [],
                                     'online_bool': []}
-        self.episode_time_step = None
-        self.offline_probability = offline_probability
-
-        self.floris_input_file = floris_input_file
-        self.wind_farm = wfct.floris_interface.FlorisInterface(
-            self.floris_input_file)
-        self.n_turbines = len(self.wind_farm.floris.farm.turbines)
-
-        self.mean_layout = [(turbine_coords.x1, turbine_coords.x2)
-                            for turbine_coords in self.wind_farm.floris.farm.turbine_map.coords]
-        self.var_layout = turbine_layout_std**2 * \
-            np.eye(2)  # for x and y coordinate
-
+    def _get_obs(self):
+        return self.current_observation
+            
+    def _get_info(self):
+        return {"Total Power": self.wind_farm.get_farm_power()}
+                
+  
     def reset(self, init_action, init_disturbance):
 
         new_layout = np.vstack([np.random.multivariate_normal(
@@ -84,7 +94,9 @@ class FOWFEnv(gym.Env):
 
         new_online_bools = [np.random.choice([0, 1], p=[self.offline_probability, 1 - self.offline_probability])
                             for t_idx in range(self.n_turbines)]
-
+        yaw_act = self._action_space['yaw_angle_set'][init_action['yaw_angle_set']]
+        ax_act = self._action_space['ax_ind_factor_set'][init_action['ax_ind_factor_set']]
+                                                      
         # initialize at steady-state
         self.wind_farm = wfct.floris_interface.FlorisInterface(
             self.floris_input_file)
@@ -94,11 +106,15 @@ class FOWFEnv(gym.Env):
             wind_direction=init_disturbance['wind_dir'],
             layout_array=new_layout)
         self.wind_farm.calculate_wake(
-            yaw_angles=init_action['yaw_angle_set'],
+            yaw_angles=[
+                a * online_bool for a,
+                online_bool in zip(
+                    yaw_act,
+                    new_online_bools)],
             axial_induction=[
                 a * online_bool for a,
                 online_bool in zip(
-                    init_action['ax_ind_factor_set'],
+                    ax_act,
                     new_online_bools)])
 
         self.episode_time_step = 0
@@ -108,8 +124,7 @@ class FOWFEnv(gym.Env):
                                     'ax_ind_factors': np.array([turbine.aI for turbine in self.wind_farm.floris.farm.turbines]),
                                     'yaw_angles': np.array([turbine.yaw_angle for turbine in self.wind_farm.floris.farm.turbines]),
                                     'online_bool': np.array(new_online_bools)}
-        #for obs in self.current_observation:
-        #    self.current_observation[obs] *= self.current_observation['online_bool']
+
 
         return self.current_observation
 
@@ -122,7 +137,10 @@ class FOWFEnv(gym.Env):
         Get the power output of each wind turbine and compute the overall rewards.
 
         """
+        yaw_act = self._action_space['yaw_angle_set'][action['yaw_angle_set']]
+        ax_act = self._action_space['ax_ind_factor_set'][action['ax_ind_factor_set']]
 
+        
         # Make list of turbine x, y coordinates samples from Gaussian
         # distributions
         new_layout = np.vstack([np.random.multivariate_normal(
@@ -130,8 +148,8 @@ class FOWFEnv(gym.Env):
 
         # Make list of turbine online/offline booleans, offline with some small probability p,
         # if a turbine is offline, set its axial induction factor to 0
-        new_online_bools = [np.random.choice([0, 1], p=[self.offline_probability, 1 - self.offline_probability])
-                            for t_idx in range(self.n_turbines)]
+        new_online_bools = np.array([np.random.choice([0, 1], p=[self.offline_probability, 1 - self.offline_probability])
+                            for t_idx in range(self.n_turbines)])
 
         self.wind_farm.floris.farm.flow_field.mean_wind_speed = disturbance['wind_speed']
         self.wind_farm.reinitialize_flow_field(
@@ -140,11 +158,11 @@ class FOWFEnv(gym.Env):
             layout_array=new_layout,
             sim_time=self.episode_time_step)
         self.wind_farm.calculate_wake(
-            yaw_angles=action['yaw_angle_set'],
+            yaw_angles=yaw_act,
             axial_induction=[
                 a * online_bool for a,
                 online_bool in zip(
-                    action['ax_ind_factor_set'],
+                    ax_act,
                     new_online_bools)],
             sim_time=self.episode_time_step)
 
@@ -156,12 +174,31 @@ class FOWFEnv(gym.Env):
         axial_induction=[
                 a * online_bool for a,
                 online_bool in zip(
-                    action['ax_ind_factor_set'],
+                    ax_act,
                     new_online_bools)]
         # Update observation
         self.current_observation = {'layout': new_layout,
-                                    'ax_ind_factors': axial_induction,
-                                    'yaw_angles': action["yaw_angle_set"],
+                                    'ax_ind_factors': ax_act,
+                                    'yaw_angles': yaw_act,
                                     'online_bool': new_online_bools}
 
-        return self.current_observation, reward, done
+        return self._get_obs(), reward, done, False, self._get_info()
+    
+if __name__ == '__main__':
+    fowf_env = FOWFEnv(
+        floris_input_file="./9turb_floris_input.json",
+        turbine_layout_std=1.,
+        offline_probability=0.001
+    )
+
+    init_action = {
+            'yaw_angle_set': [0 + (i*7) for i in range(fowf_env.n_turbines)],
+            'ax_ind_factor_set': [2+ (i*3) for i in range(fowf_env.n_turbines)]
+    }
+
+    init_disturbance = {
+            'wind_speed': 8,
+            'wind_dir': 270
+    }
+
+    fowf_env.reset(init_action, init_disturbance)
