@@ -1,7 +1,7 @@
 import numpy as np
 
 class FOWFAgent:
-    def __init__(self, turbine_id=0, eps=.4,eps_decay=None):
+    def __init__(self, turbine_id=0, eps=.4,eps_decay=1):
         self.turbine_id = turbine_id
         self.eps = eps
         self.eps_decay = eps_decay
@@ -10,7 +10,7 @@ class FOWFAgent:
         """
         Decay epsilon for epsilon-greedy learning
         """
-        self.eps *- self.eps_decay
+        self.eps *= self.eps_decay
     
     def choose_actions(self, q_vals, fowf_env):
         curr_actions = {k:None for k,v in fowf_env.action_space.items()}
@@ -23,3 +23,4 @@ class FOWFAgent:
                 act = act + (self.turbine_id*fowf_env.action_space[k].n)
             curr_actions[k] = act
         return curr_actions
+
