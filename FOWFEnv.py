@@ -1,10 +1,46 @@
 import gym
 from ray.rllib.algorithms.qmix import QMixConfig
+from ray import tune
 import numpy as np
 from floridyn import tools as wfct
+import os
+import multiprocessing as mp
 
 DT = 1.0 # discrete-time step for wind farm control
 EPISODE_LEN = int(10 * 60 // DT) # 10 minute episode length
+
+class RLALgo():
+	def __init__(self, env):
+		self.env = env
+
+	def configure_rl_algo(self):
+		# Configure the algorithm.
+		config = (QMixConfig()
+				  .environment(env=self.env)
+				  .rollouts(num_workers=mp.cpu_count())
+				  .framework('torch')
+				  .training(mixer='qmix', double_q=True)
+				  .exploration(
+					exploration_config={
+						"final_epsilon": 0.0,
+					}
+					)
+				  .evaluation(evaluation_num_workers=1)
+				  .resources(num_gpus=int(os.environ.get("RLLIB_NUM_GPUS", "0")))
+				  )
+
+		# Create our RLlib Trainer from the config object.
+		# self.algo = config.build()
+
+		# OR, train viar Ray Tune to tune hyperparameters
+		tune.run('QMIX', config=config.to_dict())
+
+	def train(self, n_iters):
+		for _ in range(n_iters):
+			self.algo.train()
+
+	def evaluate(self):
+		self.algo.evaluate()
 
 def step_wind_field(wind_speed_mean, wind_dir_mean, wind_speed_TI, wind_dir_TI):
 	ws = np.random.normal(loc=wind_speed_mean, scale=(wind_speed_TI / 100) * wind_speed_mean)[0]  # np.random.uniform(low=8, high=8.3)
