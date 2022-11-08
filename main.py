@@ -1,4 +1,4 @@
-from FOWFEnv import FOWFEnv
+from FOWFEnv import FOWFEnv, RLALgo
 
 if __name__ == '__main__':
 	fowf_env = FOWFEnv(
@@ -18,3 +18,8 @@ if __name__ == '__main__':
 	}
 
 	fowf_env.reset(init_action, init_disturbance)
+
+	rl_algo = RLALgo(fowf_env)
+	rl_algo.configure_rl_algo()
+	rl_algo.train(100)
+	rl_algo.evaluate()
