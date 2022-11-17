@@ -11,9 +11,9 @@ from ray.rllib.utils.test_utils import check_learning_achieved
 DEBUG = False
 
 RL_ALG = "QMIX" # The RLlib-registered algorithm to use.
-STOP_REWARD = 7 #8.0 # Reward at which we stop training.
+STOP_REWARD = 5 * 10**10 #8.0 # Reward at which we stop training.
 STOP_ITERS = 200 # Number of iterations to train.
-STOP_TIMESTEPS = 70000 # Number of timesteps to train.
+STOP_TIMESTEPS = STOP_ITERS * 600 # Number of timesteps to train.
 FRAMEWORK = "torch" # The DL framework specifier.
 MIXER = "qmix" # The mixer model to use.
 
@@ -30,10 +30,16 @@ if __name__ == '__main__':
 		lambda config: FOWFEnvWithGroupedAgents(config),
 	)
 	
-	
+
 	ray.init(num_cpus=mp.cpu_count() or None, local_mode=DEBUG)
 	# ray.init(num_cpus=1, local_mode=DEBUG)
-
+	
+	# Sample batches encode one or more fragments of a trajectory.
+	# RLlib collects batches of size rollout_fragment_length from rollout workers,
+	# and concatenates one or more of these batches into a batch of size train_batch_size that is the input to SGD.
+	# In multi-agent mode, sample batches are collected separately for each individual policy. These batches are wrapped up together in a MultiAgentBatch, serving as a containe
+	# Rollout workers query the policy to determine agent actions
+	# In multi-agent, there may be multiple policies, each controlling one or more agents
 	config = (
 		QMixConfig()
 			.resources(num_gpus=int(os.environ.get("RLLIB_NUM_GPUS", "0")))
@@ -51,12 +57,18 @@ if __name__ == '__main__':
 		)
 	)
 	
+	# stop when trial has reached STOP_ITERS iterations
+	# keys in the return result of tune.train()
 	stop = {
 		"episode_reward_mean": STOP_REWARD,
 		"timesteps_total": STOP_TIMESTEPS,
 		"training_iteration": STOP_ITERS,
 	}
-	results = tune.run('QMIX', config=config.to_dict())
+	
+	# .train() - Runs one logical iteration of training.
+	# .iteration - Current training iteration, value automatically incremented every time train() is called
+	# The simulation iterations of action -> reward -> next state -> train -> repeat, until the end state, is called an episode, or in RLlib, a rollout.
+	results = tune.run('QMIX', config=config.to_dict(), stop=stop)
 	check_learning_achieved(results, STOP_REWARD)
 	
 	ray.shutdown()
