@@ -1,33 +1,62 @@
-from FOWFEnv import FOWFEnv, RLALgo
-from ray.rllib.utils.pre_checks.env import (
-    check_env,
-    check_gym_environments,
-    check_multiagent_environments,
-    check_base_env,
-)
+from FOWFEnv import FOWFEnvWithGroupedAgents
+import os
+
+import ray
+from ray import tune
+from ray.tune import register_env
+from ray.rllib.algorithms.qmix import QMixConfig
+import multiprocessing as mp
+from ray.rllib.utils.test_utils import check_learning_achieved
+
+DEBUG = False
+
+RL_ALG = "QMIX" # The RLlib-registered algorithm to use.
+STOP_REWARD = 7 #8.0 # Reward at which we stop training.
+STOP_ITERS = 200 # Number of iterations to train.
+STOP_TIMESTEPS = 70000 # Number of timesteps to train.
+FRAMEWORK = "torch" # The DL framework specifier.
+MIXER = "qmix" # The mixer model to use.
 
 if __name__ == '__main__':
-	fowf_env = FOWFEnv(
-		floris_input_file="./9turb_floris_input.json",
-		turbine_layout_std=1.,
-		offline_probability=0.001
+	
+	# env_config = EnvContext(
+	env_config = {'floris_input_file': "/Users/aoifework/Documents/Research/rl_fowf_control/rl-fowf-control/9turb_floris_input.json",
+	                "turbine_layout_std": 1,
+	                "offline_probability": 0.001
+	                         }
+	
+	register_env(
+		"grouped_fowf_env",
+		lambda config: FOWFEnvWithGroupedAgents(config),
 	)
 	
-	init_action = {
-		'yaw_angle_set': [0] * fowf_env.n_turbines,
-		'ax_ind_factor_set': [0.33] * fowf_env.n_turbines
+	
+	ray.init(num_cpus=mp.cpu_count() or None, local_mode=DEBUG)
+	# ray.init(num_cpus=1, local_mode=DEBUG)
+
+	config = (
+		QMixConfig()
+			.resources(num_gpus=int(os.environ.get("RLLIB_NUM_GPUS", "0")))
+			.framework(FRAMEWORK)
+			.training(mixer=MIXER, train_batch_size=600)
+			.rollouts(num_rollout_workers=0, rollout_fragment_length=4)
+			.exploration(
+			exploration_config={
+				"final_epsilon": 0.0,
+			}
+		)
+			.environment(
+			env="grouped_fowf_env",
+			env_config=env_config,
+		)
+	)
+	
+	stop = {
+		"episode_reward_mean": STOP_REWARD,
+		"timesteps_total": STOP_TIMESTEPS,
+		"training_iteration": STOP_ITERS,
 	}
+	results = tune.run('QMIX', config=config.to_dict())
+	check_learning_achieved(results, STOP_REWARD)
 	
-	init_disturbance = {
-		'wind_speed': 8,
-		'wind_dir': 270
-	}
-	
-	# fowf_env.reset(options-{'init_action': init_action, 'init_disturbance': init_disturbance)
-	check_env(FOWFEnv)
-	
-	
-	rl_algo = RLALgo(FOWFEnv)
-	rl_algo.configure_rl_algo()
-	rl_algo.train(100)
-	rl_algo.evaluate()
+	ray.shutdown()

@@ -17,7 +17,7 @@ from ray.rllib.examples.env.two_step_game import TwoStepGame
 from ray.rllib.algorithms.qmix import QMixConfig
 # from ray.rllib.policy.policy import PolicySpec
 from ray.rllib.utils.test_utils import check_learning_achieved
-from ray.tune.registry import get_trainable_cls
+# from ray.tune.registry import get_trainable_cls
 import multiprocessing as mp
 
 DEBUG = True
@@ -30,7 +30,7 @@ FRAMEWORK = "torch" # The DL framework specifier.
 MIXER = "qmix" # The mixer model to use.
 
 if __name__ == "__main__":
-
+    
     ray.init(num_cpus=mp.cpu_count() or None, local_mode=DEBUG)
 
     grouping = {
