@@ -2,7 +2,7 @@ from FOWFEnv import FOWFEnvWithGroupedAgents
 import os
 
 import ray
-from ray import tune
+from ray import tune, air
 from ray.tune import register_env
 from ray.rllib.algorithms.qmix import QMixConfig
 import multiprocessing as mp
@@ -11,8 +11,8 @@ from ray.rllib.utils.test_utils import check_learning_achieved
 DEBUG = False
 
 RL_ALG = "QMIX" # The RLlib-registered algorithm to use.
-STOP_REWARD = 5 * 10**10 #8.0 # Reward at which we stop training.
-STOP_ITERS = 200 # Number of iterations to train.
+STOP_REWARD = 5 * 10**6 #8.0 # Reward at which we stop training.
+STOP_ITERS = 2 # Number of iterations to train.
 STOP_TIMESTEPS = STOP_ITERS * 600 # Number of timesteps to train.
 FRAMEWORK = "torch" # The DL framework specifier.
 MIXER = "qmix" # The mixer model to use.
@@ -69,6 +69,12 @@ if __name__ == '__main__':
 	# .iteration - Current training iteration, value automatically incremented every time train() is called
 	# The simulation iterations of action -> reward -> next state -> train -> repeat, until the end state, is called an episode, or in RLlib, a rollout.
 	results = tune.run('QMIX', config=config.to_dict(), stop=stop)
-	check_learning_achieved(results, STOP_REWARD)
+	# results = tune.Tuner('QMIX', run_config=air.RunConfig(stop=stop, verbose=2), param_space=config).fit()
+	best_trial = results.get_best_trial(mode='max', metric='episode_reward_mean')
+	# results.results['53306_00000']['info']['learner']['default_policy']
+	# list(results.fetch_trial_dataframes().values())[0].keys()
+	# check_learning_achieved(results, STOP_REWARD)
+	
+	# https://docs.ray.io/en/latest/rllib/package_ref/policy/policy.html
 	
 	ray.shutdown()
