@@ -2,7 +2,7 @@ from FOWFEnv import FOWFEnvWithGroupedAgents
 import os
 
 import ray
-from ray import tune
+from ray import tune, air
 from ray.tune import register_env
 from ray.rllib.algorithms.qmix import QMixConfig
 import multiprocessing as mp
@@ -19,7 +19,7 @@ MIXER = "qmix"  # The mixer model to use.
 
 if __name__ == "__main__":
 
-    # env_config = EnvContext(
+
     env_config = {
         "floris_input_file": "/scratch/alpine/jomy5901/rl-fowf-control/9turb_floris_input.json",
         "turbine_layout_std": 1,
@@ -75,9 +75,15 @@ if __name__ == "__main__":
         keep_checkpoints_num=1,
         checkpoint_at_end=True,
     )
+    
+    # best_trial = results.get_best_trial(mode='max', metric='episode_reward_mean')
+	  # results.results['53306_00000']['info']['learner']['default_policy']
+	  # list(results.fetch_trial_dataframes().values())[0].keys()
+    # https://docs.ray.io/en/latest/rllib/package_ref/policy/policy.html
+    
     import pdb
 
     # pdb.set_trace()
-    check_learning_achieved(results, STOP_REWARD)
+    # check_learning_achieved(results, STOP_REWARD)
 
     ray.shutdown()
