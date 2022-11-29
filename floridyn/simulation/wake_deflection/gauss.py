@@ -172,7 +172,10 @@ class Gauss(VelocityDeflection):
         # wake expansion parameters
         ky = ka * TI + kb
         kz = ka * TI + kb
-
+        
+        # if any((u0 > wind_speed).flatten()):
+        #     print(1)
+        
         C0 = 1 - u0 / wind_speed
         M0 = C0 * (2 - C0)
         E0 = C0 ** 2 - 3 * np.exp(1.0 / 12.0) * C0 + 3 * np.exp(1.0 / 3.0)
@@ -209,6 +212,7 @@ class Gauss(VelocityDeflection):
         ln_deltaNum = (1.6 + np.sqrt(M0)) * (
             1.6 * np.sqrt(sigma_y * sigma_z / (sigma_y0 * sigma_z0)) - np.sqrt(M0)
         )
+        
         ln_deltaDen = (1.6 - np.sqrt(M0)) * (
             1.6 * np.sqrt(sigma_y * sigma_z / (sigma_y0 * sigma_z0)) + np.sqrt(M0)
         )
