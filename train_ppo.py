@@ -17,6 +17,7 @@ def train(env, model, epochs=10000, save_name="ppo_fowf"):
     obs = env.reset()
     rewards = []
     for _ in range(epochs):
+        obs = env.reset()
         done = False
         while not done:
             action, _states = model.predict(obs)
