@@ -49,54 +49,55 @@ class FOWFEnv(Env):
         self.agents = list(range(self.n_turbines))
         self._skip_env_checking = False
         self._agent_ids = set(self.agents)
-        self.action_space = MultiDiscrete(
-            [len(AX_IND_FACTORS) * len(YAW_ANGLES) for _ in range(self.n_turbines)]
-        )
-
+        self.action_space = MultiDiscrete([len(AX_IND_FACTORS) * len(YAW_ANGLES)
+                                                  for _ in range(self.n_turbines)])
+        
         self.agent_observation_space = Dict(
             {
-                #                 "obs": Dict(
-                #                     {
-                "layout_x": Box(
-                    low=min(
-                        coord.x1
-                        for coord in self.wind_farm.floris.farm.turbine_map.coords
-                    ),
-                    high=max(
-                        coord.x1
-                        for coord in self.wind_farm.floris.farm.turbine_map.coords
-                    ),
-                    shape=(self.n_turbines,),
-                    dtype=np.float16,
-                ),
-                "layout_y": Box(
-                    low=min(
-                        coord.x2
-                        for coord in self.wind_farm.floris.farm.turbine_map.coords
-                    ),
-                    high=max(
-                        coord.x2
-                        for coord in self.wind_farm.floris.farm.turbine_map.coords
-                    ),
-                    shape=(self.n_turbines,),
-                    dtype=np.float16,
-                ),
-                "ax_ind_factors": MultiDiscrete(
-                    [len(AX_IND_FACTORS)] * self.n_turbines
-                ),
-                "yaw_angles": MultiDiscrete([len(YAW_ANGLES)] * self.n_turbines),
-                "online_bool": MultiBinary(self.n_turbines),
-                "turbine_idx": Discrete(self.n_turbines),
-            }
+#                 "obs": Dict(
+#                     {
+                        "layout_x": Box(
+                            low=min(
+                                coord.x1
+                                for coord in self.wind_farm.floris.farm.turbine_map.coords
+                            ),
+                            high=max(
+                                coord.x1
+                                for coord in self.wind_farm.floris.farm.turbine_map.coords
+                            ),
+                            shape=(self.n_turbines,),
+                            dtype=np.float16,
+                        ),
+                        "layout_y": Box(
+                            low=min(
+                                coord.x2
+                                for coord in self.wind_farm.floris.farm.turbine_map.coords
+                            ),
+                            high=max(
+                                coord.x2
+                                for coord in self.wind_farm.floris.farm.turbine_map.coords
+                            ),
+                            shape=(self.n_turbines,),
+                            dtype=np.float16,
+                        ),
+                        "ax_ind_factors": MultiDiscrete(
+                            [len(AX_IND_FACTORS)] * self.n_turbines
+                        ),
+                        "yaw_angles": MultiDiscrete(
+                            [len(YAW_ANGLES)] * self.n_turbines
+                        ),
+                        "online_bool": MultiBinary(self.n_turbines),
+                        "turbine_idx": Discrete(self.n_turbines),
+                    }
             #    )
-            # }
+            #}
         )
 
         self.observation_space = self.agent_observation_space
-
-        #         Dict(
-        #             {k: self.agent_observation_space for k in self._agent_ids}
-        #         )
+        
+#         Dict(
+#             {k: self.agent_observation_space for k in self._agent_ids}
+#         )
 
         # self.ax_ind_factor_indices = np.arange(0, self.n_turbines)
         # self.yaw_angle_indices = np.arange(self.n_turbines, 2 * self.n_turbines)
@@ -183,8 +184,7 @@ class FOWFEnv(Env):
 
     def get_action_values(self, action_dict, online_bools):
         import pdb
-
-        # pdb.set_trace()
+        #pdb.set_trace()
         ax_ind_factor_idx = np.array(
             [int(action_dict[k] // len(YAW_ANGLES)) for k in self._agent_ids]
         )
@@ -290,18 +290,23 @@ class FOWFEnv(Env):
 
         # global_reward = self.wind_farm.get_farm_power()
         rewards = {k: self.wind_farm.get_turbine_power()[k] for k in self._agent_ids}
+        
 
         # Set `done` flag after EPISODE_LEN steps.
         self.episode_time_step += 1
         dones = {"__all__": self.episode_time_step >= EPISODE_LEN}
+        dones = dones["__all__"]
+        reward = 0
+        for k in rewards:
+            reward += rewards[k]
 
         # Update observation
         obs = self._obs(online_bools=new_online_bools)
 
-        return obs, rewards, dones, {}
+        return obs, reward, dones, {}
 
     def _obs(self, online_bools):
-        return {k: self._agent_obs(k, online_bools) for k in self._agent_ids}[0]["obs"]
+        return {k: self._agent_obs(k, online_bools) for k in self._agent_ids}[0]['obs']
 
     def _agent_obs(self, agent_idx, online_bools):
         online_bools = np.array(online_bools)
@@ -390,3 +395,4 @@ class FOWFEnvWithGroupedAgents(MultiAgentEnv):
             k: {kk: {"obs": sample[kk]} for kk in range(sample.__len__())}
             for k in self._agent_ids
         }
+
