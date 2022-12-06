@@ -297,8 +297,8 @@ class FOWFEnv(Env):
         dones = {"__all__": self.episode_time_step >= EPISODE_LEN}
         dones = dones["__all__"]
         reward = 0
-        for k in rewards:
-            reward += rewards[k]
+        for idx, k in enumerate(rewards):
+            reward += rewards[k] * new_oneline_bools[idx]
 
         # Update observation
         obs = self._obs(online_bools=new_online_bools)
@@ -395,4 +395,3 @@ class FOWFEnvWithGroupedAgents(MultiAgentEnv):
             k: {kk: {"obs": sample[kk]} for kk in range(sample.__len__())}
             for k in self._agent_ids
         }
-
