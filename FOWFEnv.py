@@ -298,7 +298,7 @@ class FOWFEnv(Env):
         dones = dones["__all__"]
         reward = 0
         for idx, k in enumerate(rewards):
-            reward += rewards[k] * new_oneline_bools[idx]
+            reward += rewards[k] * new_online_bools[idx]
 
         # Update observation
         obs = self._obs(online_bools=new_online_bools)
