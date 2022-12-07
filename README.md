@@ -1,5 +1,4 @@
-# Code for "Reinforcement Learning for Optimal Operation of Stochastic Floating"
-Wind Farm Environment"
+# Code for "Reinforcement Learning for Optimal Operation of Stochastic Floating Wind Farm Environments"
 
 __Authors__: Aoife Henry, Josh Myers-Dean
 
