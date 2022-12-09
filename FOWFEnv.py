@@ -120,6 +120,64 @@ class FOWFEnv(MultiAgentEnv):
         self.mean_wind_speed = None
         self.mean_wind_dir = None
 
+    def _new_layout(self):
+        new_layout = np.vstack(
+            [
+                np.random.multivariate_normal(self.mean_layout[t_idx], self.var_layout)
+                for t_idx in range(self.n_turbines)
+            ]
+        ).T
+    
+        new_layout[0, :] = np.clip(
+            new_layout[0, :],
+            self.x_bounds[0], self.x_bounds[1]
+        )
+        new_layout[1, :] = np.clip(
+            new_layout[1, :],
+            self.y_bounds[0], self.y_bounds[1]
+        )
+    
+        return new_layout
+
+    def _new_online_bools(self):
+        return [
+            np.random.choice(
+                [0, 1], p=[self.offline_probability, 1 - self.offline_probability]
+            )
+            for _ in range(self.n_turbines)
+        ]
+
+    def _new_wind_speed(self):
+        self.mean_wind_speed = self.mean_wind_speed + np.random.choice(
+            [-self.wind_speed_var, 0, self.wind_speed_var],
+            p=[
+                self.wind_change_probability / 2,
+                1 - self.wind_change_probability,
+                self.wind_change_probability / 2,
+            ],
+        )
+        self.mean_wind_speed = np.clip(
+            self.mean_wind_speed, WIND_SPEED_RANGE[0], WIND_SPEED_RANGE[1]
+        )
+    
+        return self.mean_wind_speed + np.random.normal(
+            scale=self.wind_speed_var
+        )
+
+    def _new_wind_dir(self):
+        self.mean_wind_dir = self.mean_wind_dir + np.random.choice(
+            [-self.wind_dir_var, 0, self.wind_dir_var],
+            p=[
+                self.wind_change_probability / 2,
+                1 - self.wind_change_probability,
+                self.wind_change_probability / 2,
+            ],
+        )
+        self.mean_wind_dir = np.clip(
+            self.mean_wind_dir, WIND_DIR_RANGE[0], WIND_DIR_RANGE[1]
+        )
+        return self.mean_wind_dir + np.random.normal(scale=self.wind_dir_var)
+    
     def reset(self):
         self.mean_wind_speed = np.random.choice(
             np.arange(WIND_SPEED_RANGE[0], WIND_SPEED_RANGE[1], self.wind_speed_var)
@@ -130,30 +188,9 @@ class FOWFEnv(MultiAgentEnv):
 
         init_action_dict = self.action_space_sample()
 
-        new_layout = np.vstack(
-            [
-                np.random.multivariate_normal(self.mean_layout[t_idx], self.var_layout)
-                for t_idx in range(self.n_turbines)
-            ]
-        ).T
+        new_layout = self._new_layout()
 
-        new_layout[0, :] = np.clip(
-            new_layout[0, :],
-            self.agent_observation_space["obs"]["layout_x"].low,
-            self.agent_observation_space["obs"]["layout_x"].high,
-        )
-        new_layout[1, :] = np.clip(
-            new_layout[1, :],
-            self.agent_observation_space["obs"]["layout_y"].low,
-            self.agent_observation_space["obs"]["layout_y"].high,
-        )
-
-        init_online_bools = [
-            np.random.choice(
-                [0, 1], p=[self.offline_probability, 1 - self.offline_probability]
-            )
-            for _ in range(self.n_turbines)
-        ]
+        init_online_bools = self._new_online_bools()
 
         # initialize at steady-state
         self.wind_farm = wfct.floris_interface.FlorisInterface(self.floris_input_file)
@@ -178,7 +215,7 @@ class FOWFEnv(MultiAgentEnv):
 
         self.episode_time_step = 0
 
-        obs = self._obs(init_online_bools)
+        obs = self._obs(self.mean_wind_speed, self.mean_wind_dir, init_online_bools)
 
         return obs
 
@@ -209,61 +246,15 @@ class FOWFEnv(MultiAgentEnv):
 
         """
 
-        self.mean_wind_speed = self.mean_wind_speed + np.random.choice(
-            [-self.wind_speed_var, 0, self.wind_speed_var],
-            p=[
-                self.wind_change_probability / 2,
-                1 - self.wind_change_probability,
-                self.wind_change_probability / 2,
-            ],
-        )
-        self.mean_wind_speed = np.clip(
-            self.mean_wind_speed, WIND_SPEED_RANGE[0], WIND_SPEED_RANGE[1]
-        )
-
-        self.mean_wind_dir = self.mean_wind_dir + np.random.choice(
-            [-self.wind_dir_var, 0, self.wind_dir_var],
-            p=[
-                self.wind_change_probability / 2,
-                1 - self.wind_change_probability,
-                self.wind_change_probability / 2,
-            ],
-        )
-        self.mean_wind_dir = np.clip(
-            self.mean_wind_dir, WIND_DIR_RANGE[0], WIND_DIR_RANGE[1]
-        )
-
-        new_wind_speed = self.mean_wind_speed + np.random.normal(
-            scale=self.wind_speed_var
-        )
-        new_wind_dir = self.mean_wind_dir + np.random.normal(scale=self.wind_dir_var)
+        new_wind_speed = self._new_wind_speed()
+        new_wind_dir = self._new_wind_dir()
 
         # Make list of turbine x, y coordinates samples from Gaussian distributions
-        new_layout = np.vstack(
-            [
-                np.random.multivariate_normal(self.mean_layout[t_idx], self.var_layout)
-                for t_idx in range(self.n_turbines)
-            ]
-        ).T
-        new_layout[0, :] = np.clip(
-            new_layout[0, :],
-            self.agent_observation_space["obs"]["layout_x"].low,
-            self.agent_observation_space["obs"]["layout_x"].high,
-        )
-        new_layout[1, :] = np.clip(
-            new_layout[1, :],
-            self.agent_observation_space["obs"]["layout_y"].low,
-            self.agent_observation_space["obs"]["layout_y"].high,
-        )
+        new_layout = self._new_layout()
 
         # Make list of turbine online/offline booleans, offline with some small probability p,
         # if a turbine is offline, set its axial induction factor to 0
-        new_online_bools = [
-            np.random.choice(
-                [0, 1], p=[self.offline_probability, 1 - self.offline_probability]
-            )
-            for _ in range(self.n_turbines)
-        ]
+        new_online_bools = self._new_online_bools()
 
         (
             new_yaw_angles,
@@ -294,15 +285,15 @@ class FOWFEnv(MultiAgentEnv):
         dones = {"__all__": self.episode_time_step >= EPISODE_LEN}
 
         # Update observation
-        obs = self._obs(online_bools=new_online_bools)
+        obs = self._obs(new_wind_speed, new_wind_dir, online_bools=new_online_bools)
 
         return obs, rewards, dones, {}
 
-    def _obs(self, online_bools):
-        return {k: self._agent_obs(k, online_bools) for k in self._agent_ids}
+    def _obs(self, wind_speed, wind_dir, online_bools):
+        return {k: self._agent_obs(k, wind_speed, wind_dir, online_bools) for k in self._agent_ids}
         # return self._agent_obs(0, online_bools)
 
-    def _agent_obs(self, agent_idx, online_bools):
+    def _agent_obs(self, agent_idx, wind_speed, wind_dir, online_bools):
         online_bools = np.array(online_bools)
 
         try:
@@ -318,6 +309,8 @@ class FOWFEnv(MultiAgentEnv):
 
         return {
             "obs": {
+                "wind_speed": wind_speed,
+                "wind_dir": wind_dir,
                 "layout_x":
                     [
                         coords.x1
