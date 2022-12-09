@@ -14,17 +14,18 @@ from ray import air, tune
 from ray.tune import register_env
 from ray.rllib.env.multi_agent_env import ENV_STATE
 from ray.rllib.examples.env.two_step_game import TwoStepGame
-from ray.rllib.algorithms.qmix import QMixConfig
+from ray.rllib.algorithms.qmix import QMixConfig, QMix
 # from ray.rllib.policy.policy import PolicySpec
 from ray.rllib.utils.test_utils import check_learning_achieved
-# from ray.tune.registry import get_trainable_cls
+from ray.tune.registry import get_trainable_cls, ENV_CREATOR, _global_registry
 import multiprocessing as mp
+from ray.air.config import CheckpointConfig
 
 DEBUG = True
 
 RL_ALG = "QMIX" # The RLlib-registered algorithm to use.
 STOP_REWARD = 7 #8.0 # Reward at which we stop training.
-STOP_ITERS = 200 # Number of iterations to train.
+STOP_ITERS = 200 if not DEBUG else 2 # Number of iterations to train.
 STOP_TIMESTEPS = 70000 # Number of timesteps to train.
 FRAMEWORK = "torch" # The DL framework specifier.
 MIXER = "qmix" # The mixer model to use.
@@ -73,7 +74,6 @@ if __name__ == "__main__":
         
     )
 
-    
     config = (
         QMixConfig()
             .resources(num_gpus=int(os.environ.get("RLLIB_NUM_GPUS", "0")))
@@ -99,15 +99,66 @@ if __name__ == "__main__":
         "timesteps_total": STOP_TIMESTEPS,
         "training_iteration": STOP_ITERS,
     }
-    results = tune.run('QMIX', config=config.to_dict())
+    checkpoint = CheckpointConfig(checkpoint_at_end=True, num_to_keep=1)
+    TRAIN = False
+    if TRAIN:
+        results = tune.Tuner(
+            "QMIX",
+            run_config=air.RunConfig(stop=stop, checkpoint_config=checkpoint),
+            param_space=config.to_dict()
+        ).fit()
     
-    # results = tune.Tuner(
-    #     RL_ALG,
-    #     run_config=air.RunConfig(stop=stop, verbose=2),
-    #     param_space=config,
-    # ).fit()
+        # list of lists: one list per checkpoint; each checkpoint list contains
+        # 1st the path, 2nd the metric value
+        # if there are multiple trials, select a specific trial or automatically
+        # choose the best one according to a given metric
+        last_checkpoint = results._experiment_analysis.get_last_checkpoint(
+            metric="episode_reward_mean", mode="max"
+        )
+        checkpoint_path = last_checkpoint._local_path
 
-    if DEBUG:
-        check_learning_achieved(results, STOP_REWARD)
+    ## TESTING
+    TEST = True
+    N_TESTS = 1
+    if TEST:
+        def run_test(agent, env_class, env_config, test_idx):
+            print(f'Running test {test_idx}')
+            # run until episode ends
+            episode_results = {'obs': [], 'action': [], 'reward': []}
+            env = env_class(env_config)
+            episode_reward = 0
+            done = False
+            obs = env.reset()
+            k = 0
+            while not done:
+                episode_results['obs'].append(obs)
+                # compute action for farm_1 group
+                action = agent.compute_single_action(obs['group_1'])
+                episode_results['action'].append(action)
+                obs, reward, done, info = env.step(action)
+                episode_results['reward'].append(reward)
+                episode_reward += reward
+                print(test_idx, k, episode_reward)
+                k += 1
+            return episode_results
+    
+    
+        # load and restore a trained agent from a checkpoint
+        checkpoint_path = '/Users/aoifework/ray_results/QMIX/QMIX_grouped_twostep_4abd4_00000_0_2022-11-29_16-12-27/checkpoint_000002/'
+        env_cls = _global_registry.get(ENV_CREATOR, "grouped_twostep")
+        env_config = {}
+        agent = QMix(config=config, env="grouped_twostep")
+        agent.restore(checkpoint_path)
+    
+        if DEBUG:
+            all_episode_results = []
+            for test_idx in range(N_TESTS):
+                all_episode_results.append(run_test(agent, env_cls, env_config, test_idx))
+        else:
+            pool = mp.Pool(mp.cpu_count())
+            all_episode_results = pool.starmap(run_test,
+                                               [(agent, env_cls, env_config, test_idx) for test_idx in
+                                                range(N_TESTS)])
+            pool.close()
 
     ray.shutdown()

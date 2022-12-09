@@ -214,9 +214,9 @@ class FlorisInterface(LoggerBase):
             else:
                 self.floris.farm.set_axial_induction(axial_induction)
 
-        if (any(angle_changes) or any(ai_changes)) and sim_time is not None:
+        if (any(angle_changes) or any(ai_changes))  and sim_time is not None:
 
-            self.floris.farm.flow_field.calculate_wake(look_ahead=True, sim_time=sim_time, propagate_wind_speed=self.propagate_wind_speed, angle_changes=angle_changes)
+            self.floris.farm.flow_field.calculate_wake(look_ahead=True, sim_time=sim_time, propagate_wind_speed=self.propagate_wind_speed,angle_changes=angle_changes)
 
             if hasattr(self, "vis_flow_field"):
                 self.vis_flow_field.wind_change_resolved = False
@@ -1289,6 +1289,7 @@ class FlorisInterface(LoggerBase):
         unc_pmfs=None,
         unc_options=None,
         no_wake=False,
+        ai_factors=None
     ):
         """
         Assign yaw angles to turbines, calculate wake, and report farm power.
@@ -1344,13 +1345,80 @@ class FlorisInterface(LoggerBase):
         """
         # TODO: needed to bypass code in calculate_wake, could do so more efficiently I think.
         self.steady_yaw_angles = yaw_angles
-
+        
         self.calculate_wake(yaw_angles=yaw_angles, no_wake=no_wake)
 
         return self.get_farm_power(
             include_unc=include_unc, unc_pmfs=unc_pmfs, unc_options=unc_options
         )
 
+    def get_farm_power_for_ai_factor(
+        self,
+        ai_factors,
+        include_unc=False,
+        unc_pmfs=None,
+        unc_options=None,
+        no_wake=False
+    ):
+        """
+        Assign yaw angles to turbines, calculate wake, and report farm power.
+
+        Args:
+            yaw_angles (np.array): Yaw to apply to each turbine.
+            include_unc (bool, optional): When *True*, includes wind direction
+                uncertainty in estimate of wind farm power. Defaults to *False*.
+            unc_pmfs (dictionary, optional): A dictionary containing optional
+                probability mass functions describing the distribution of wind
+                direction and yaw position deviations when wind direction and/or
+                yaw position uncertainty is included in the power calculations.
+                Contains the following key-value pairs:
+
+                -   **wd_unc** (*np.array*): Wind direction deviations from the
+                    original wind direction.
+                -   **wd_unc_pmf** (*np.array*): Probability of each wind
+                    direction deviation in **wd_unc** occuring.
+                -   **yaw_unc** (*np.array*): Yaw angle deviations from the
+                    original yaw angles.
+                -   **yaw_unc_pmf** (*np.array*): Probability of each yaw angle
+                    deviation in **yaw_unc** occuring.
+
+                Defaults to None, in which case default PMFs are calculated
+                using values provided in **unc_options**.
+            unc_options (dictionary, optional): A dictionary containing values
+                used to create normally-distributed, zero-mean probability mass
+                functions describing the distribution of wind direction and yaw
+                position deviations when wind direction and/or yaw position
+                uncertainty is included. This argument is only used when
+                **unc_pmfs** is None and contains the following key-value pairs:
+
+                -   **std_wd** (*float*): A float containing the standard
+                    deviation of the wind direction deviations from the
+                    original wind direction.
+                -   **std_yaw** (*float*): A float containing the standard
+                    deviation of the yaw angle deviations from the original yaw
+                    angles.
+                -   **pmf_res** (*float*): A float containing the resolution in
+                    degrees of the wind direction and yaw angle PMFs.
+                -   **pdf_cutoff** (*float*): A float containing the cumulative
+                    distribution function value at which the tails of the
+                    PMFs are truncated.
+
+                Defaults to None. Initializes to {'std_wd': 4.95, 'std_yaw': 1.
+                75, 'pmf_res': 1.0, 'pdf_cutoff': 0.995}.
+            no_wake: (bool, optional): When *True* updates the turbine
+                quantities without calculating the wake or adding the
+                wake to the flow field. Defaults to *False*.
+
+        Returns:
+            float: Wind plant power. #TODO negative? in kW?
+        """
+   
+        self.calculate_wake(axial_induction=ai_factors, no_wake=no_wake)
+    
+        return self.get_farm_power(
+            include_unc=include_unc, unc_pmfs=unc_pmfs, unc_options=unc_options
+        )
+    
     def get_farm_AEP(self, wd, ws, freq, yaw=None):
         """
         Estimate annual energy production (AEP) for distributions of wind
