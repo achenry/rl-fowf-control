@@ -1355,6 +1355,7 @@ class FlorisInterface(LoggerBase):
     def get_farm_power_for_ai_factor(
         self,
         ai_factors,
+        yaw_angles,
         include_unc=False,
         unc_pmfs=None,
         unc_options=None,
@@ -1413,7 +1414,7 @@ class FlorisInterface(LoggerBase):
             float: Wind plant power. #TODO negative? in kW?
         """
    
-        self.calculate_wake(axial_induction=ai_factors, no_wake=no_wake)
+        self.calculate_wake(yaw_angles=yaw_angles, axial_induction=ai_factors, no_wake=no_wake)
     
         return self.get_farm_power(
             include_unc=include_unc, unc_pmfs=unc_pmfs, unc_options=unc_options

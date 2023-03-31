@@ -129,6 +129,9 @@ class Simulator:
 		self.mean_wind_speed = None
 		self.mean_wind_dir = None
 		
+		self.wind_speed_ts = None
+		self.wind_dir_ts = None
+		
 		self.x_bounds = (min(coord.x1 for coord in self.wind_farm.floris.farm.turbine_map.coords),
 		                 max(coord.x1 for coord in self.wind_farm.floris.farm.turbine_map.coords))
 		
@@ -162,16 +165,23 @@ class Simulator:
 			for _ in range(self.n_turbines)
 		]
 	
-	def reset(self, init_wind_speed=None, init_wind_dir=None):
-		if init_wind_speed is not None
-			self.mean_wind_speed = init_wind_speed
-		else:
+	def reset(self, wind_speed_ts=None, wind_dir_ts=None):
+		self.wind_speed_ts = wind_speed_ts
+		self.wind_speed_dir = wind_dir_ts
+		
+		if self.wind_speed_ts is None:
 			self.mean_wind_speed = np.random.choice(self.wind_speed_range)
-			
-		if init_wind_dir is not None:
-			self.mean_wind_dir = init_wind_dir
+			wind_speed = self.mean_wind_speed
 		else:
+			self.mean_wind_speed = wind_speed_ts[0]
+			wind_speed = wind_speed_ts[0]
+			
+		if self.wind_dir_ts is None:
 			self.mean_wind_dir = np.random.choice(self.wind_dir_range)
+			wind_dir = self.mean_wind_dir
+		else:
+			self.mean_wind_dir = wind_dir_ts[0]
+			wind_dir = wind_dir_ts[0]
 			
 		
 		# init_action_dict = self.action_space_sample()
@@ -184,15 +194,15 @@ class Simulator:
 		self.wind_farm = wfct.floris_interface.FlorisInterface(self.floris_input_file)
 		self.wind_farm.floris.farm.flow_field.mean_wind_speed = self.mean_wind_speed
 		self.wind_farm.reinitialize_flow_field(
-			wind_speed=self.mean_wind_speed,
-			wind_direction=self.mean_wind_dir,
+			wind_speed=wind_speed,
+			wind_direction=wind_dir,
 			layout_array=new_layout,
 		)
 		
 		if self.from_lut:
 			yaw_angle_interpolant = NearestNDInterpolator(self.df_opt[["wd", "ws"]], self.df_opt[self.yaw_cols])
 			ai_interpolant = NearestNDInterpolator(self.df_opt[["wd", "ws"]], self.df_opt[self.ai_cols])
-			X, Y = np.meshgrid([self.mean_wind_dir], [self.mean_wind_speed], indexing='ij')
+			X, Y = np.meshgrid([wind_dir], [wind_speed], indexing='ij')
 			yaw_angles = yaw_angle_interpolant(X, Y)[0][0]
 			set_ax_ind_factors = ai_interpolant(X, Y)[0][0]
 		else:
@@ -218,35 +228,40 @@ class Simulator:
 		return obs
 	
 	def _new_wind_speed(self):
-		self.mean_wind_speed = self.mean_wind_speed + np.random.choice(
-			[-self.wind_speed_var, 0, self.wind_speed_var],
-			p=[
-				self.wind_change_probability / 2,
-				1 - self.wind_change_probability,
-				self.wind_change_probability / 2,
-			],
-		)
-		self.mean_wind_speed = np.clip(
-			self.mean_wind_speed, WIND_SPEED_RANGE[0], WIND_SPEED_RANGE[1]
-		)
-		
-		return self.mean_wind_speed + np.random.normal(
+		if self.wind_speed_ts is None:
+			self.mean_wind_speed = self.mean_wind_speed + np.random.choice(
+				[-self.wind_speed_var, 0, self.wind_speed_var],
+				p=[
+					self.wind_change_probability / 2,
+					1 - self.wind_change_probability,
+					self.wind_change_probability / 2,
+				],
+			)
+			self.mean_wind_speed = np.clip(
+				self.mean_wind_speed, WIND_SPEED_RANGE[0], WIND_SPEED_RANGE[1]
+			)
+			return self.mean_wind_speed + np.random.normal(
 			scale=self.wind_speed_var
-		)
+			)
+		else:
+			return self.wind_speed_ts[self.episode_time_step]
 	
 	def _new_wind_dir(self):
-		self.mean_wind_dir = self.mean_wind_dir + np.random.choice(
-			[-self.wind_dir_var, 0, self.wind_dir_var],
-			p=[
-				self.wind_change_probability / 2,
-				1 - self.wind_change_probability,
-				self.wind_change_probability / 2,
-			],
-		)
-		self.mean_wind_dir = np.clip(
-			self.mean_wind_dir, WIND_DIR_RANGE[0], WIND_DIR_RANGE[1]
-		)
-		return self.mean_wind_dir + np.random.normal(scale=self.wind_dir_var)
+		if self.wind_dir_ts is None:
+			self.mean_wind_dir = self.mean_wind_dir + np.random.choice(
+				[-self.wind_dir_var, 0, self.wind_dir_var],
+				p=[
+					self.wind_change_probability / 2,
+					1 - self.wind_change_probability,
+					self.wind_change_probability / 2,
+				],
+			)
+			self.mean_wind_dir = np.clip(
+				self.mean_wind_dir, WIND_DIR_RANGE[0], WIND_DIR_RANGE[1]
+			)
+			return self.mean_wind_dir + np.random.normal(scale=self.wind_dir_var)
+		else:
+			return self.wind_dir_ts[self.episode_time_step]
 		
 	def step(self):
 		"""
@@ -268,11 +283,17 @@ class Simulator:
 		# if a turbine is offline, set its axial induction factor to 0
 		new_online_bools = self._new_online_bools()
 		
-		yaw_angle_interpolant = NearestNDInterpolator(self.df_opt[["wd", "ws"]], self.df_opt[self.yaw_cols])
-		ai_interpolant = NearestNDInterpolator(self.df_opt[["wd", "ws"]], self.df_opt[self.ai_cols])
-		X, Y = np.meshgrid([self.mean_wind_dir], [self.mean_wind_speed], indexing='ij')
-		yaw_angles = yaw_angle_interpolant(X, Y)[0][0]
-		set_ax_ind_factors = ai_interpolant(X, Y)[0][0]
+		if self.from_lut:
+			yaw_angle_interpolant = NearestNDInterpolator(self.df_opt[["wd", "ws"]], self.df_opt[self.yaw_cols])
+			ai_interpolant = NearestNDInterpolator(self.df_opt[["wd", "ws"]], self.df_opt[self.ai_cols])
+			X, Y = np.meshgrid([new_wind_dir], [new_wind_speed], indexing='ij')
+			yaw_angles = yaw_angle_interpolant(X, Y)[0][0]
+			set_ax_ind_factors = ai_interpolant(X, Y)[0][0]
+		else:
+			yaw_angles = [0.0 for t in range(self.n_turbines)]
+			set_ax_ind_factors = [0.33 for t in range(self.n_turbines)]
+		
+		
 		(
 			new_yaw_angles,
 			set_new_ax_ind_factors,
@@ -381,8 +402,8 @@ if __name__ == "__main__":
 		
 		df_opt = {'wd': [], 'ws': [], 'yaw_angles_opt': [], 'ai_opt': []}
 		
-		for wd in WIND_DIR_RANGE:
-			for ws in WIND_SPEED_RANGE:
+		for wd in np.arange(WIND_DIR_RANGE[0], WIND_DIR_RANGE[1], WIND_DIR_VAR):
+			for ws in np.arange(WIND_SPEED_RANGE[0], WIND_SPEED_RANGE[1], WIND_SPEED_VAR):
 				fi.reinitialize_flow_field(
 					wind_direction=wd,
 					wind_speed=ws
@@ -399,6 +420,7 @@ if __name__ == "__main__":
 				# ai_opt
 				ai_opt = AiOptimization(
 					fi=fi,
+					yaw_angles=yaw_angles_opt,
 					minimum_ai_factor=0,
 					maximum_ai_factor=0.33,
 					include_unc=False
@@ -409,7 +431,7 @@ if __name__ == "__main__":
 				end_time = timerpc()
 				t_tot = end_time - start_time
 		
-				print("Optimization for {:d} m/s, {:d} deg finished in {:.2f} seconds.".format(ws, wd, t_tot))
+				print("Optimization for {:2f} m/s, {:d} deg finished in {:.2f} seconds.".format(ws, wd, t_tot))
 				print(" ")
 				print(yaw_angles_opt, ai_set_opt)
 				print(" ")
@@ -421,9 +443,22 @@ if __name__ == "__main__":
 		
 		df_opt = pd.DataFrame(df_opt)
 		df_opt['freq_val'] = np.zeros_like(df_opt.index)
+		
+		# df_windrose.loc[1.5] = {'ws': np.nan, 'wd': np.nan, 'freq_val': np.nan}
+		# for wd in df_opt['wd'].unique():
+		# 	for ws in df_opt['ws'].unique():
+		# 		if ws not in df_windrose['ws']:
+		# 			new_idx = df_windrose['ws'] == ws -
+		
+		# df_windrose = df_windrose.sort_index().reset_index(drop=True)
 		for row_idx, row in df_opt.iterrows():
-			df_opt.loc[row_idx, 'freq_val'] = \
-				df_windrose.loc[(df_windrose['ws'] == row['ws']) & (df_windrose['wd'] == row['wd']), 'freq_val'].values[0]
+			if row['ws'] in df_windrose['ws']:
+				df_opt.loc[row_idx, 'freq_val'] = \
+					df_windrose.loc[(df_windrose['ws'] == row['ws']) & (df_windrose['wd'] == row['wd']), 'freq_val'].values[0]
+			else:
+				idx = df_windrose['wd'] == row['wd']
+				df_opt.loc[row_idx, 'freq_val'] = \
+					np.interp(row['ws'], df_windrose.loc[idx, 'ws'], df_windrose.loc[idx, 'freq_val'])
 		# Now define how the optimal yaw angles for 8 m/s are applied over the other wind speeds
 		# yaw_angles_wind_rose = np.zeros((len(WIND_DIR_RANGE), len(WIND_SPEED_RANGE), nturbs))
 		# for wd_idx, wd in enumerate(WIND_DIR_RANGE):
@@ -461,7 +496,15 @@ if __name__ == "__main__":
 	simulator_opt = Simulator(df_opt=df_opt, floris_input_file=floris_dir, from_lut=True)
 	init_wind_speed = 12
 	init_wind_dir = 270
-	simulator_opt.reset(init_wind_speed=init_wind_speed, init_wind_dir=init_wind_dir)
+	wind_speed_ts = [init_wind_speed]
+	wind_dir_ts = [init_wind_dir]
+	simulator_opt.mean_wind_speed = init_wind_speed
+	simulator_opt.mean_wind_dir = init_wind_dir
+	for k in range(1, EPISODE_LEN):
+		wind_speed_ts.append(simulator_opt._new_wind_speed())
+		wind_dir_ts.append(simulator_opt._new_wind_dir())
+	
+	simulator_opt.reset(wind_speed_ts=wind_speed_ts, wind_dir_ts=wind_dir_ts)
 	episode_rewards_opt = []
 	for k in range(EPISODE_LEN):
 		obs, rewards, dones, _ = simulator_opt.step()
@@ -472,7 +515,7 @@ if __name__ == "__main__":
 	
 	# simulate for ten minutes with naive values
 	simulator_baseline = Simulator(df_opt=df_opt, floris_input_file=floris_dir, from_lut=False)
-	simulator_baseline.reset(init_wind_speed=init_wind_speed, init_wind_dir=init_wind_dir)
+	simulator_baseline.reset(wind_speed_ts=wind_speed_ts, wind_dir_ts=wind_dir_ts)
 	episode_rewards_baseline = []
 	for k in range(EPISODE_LEN):
 		obs, rewards, dones, _ = simulator_baseline.step()

@@ -27,6 +27,7 @@ class AiOptimization(Optimization):
     def __init__(
         self,
         fi,
+        yaw_angles,
         minimum_ai_factor=0.0,
         maximum_ai_factor=0.33,
         x0=None,
@@ -109,6 +110,8 @@ class AiOptimization(Optimization):
         """
         super().__init__(fi)
         
+        self.yaw_angles = yaw_angles
+        
         if opt_options is None:
             self.opt_options = {
                 "maxiter": 100,
@@ -144,6 +147,7 @@ class AiOptimization(Optimization):
     def _ai_power_opt(self, ai_factors):
         return -1 * self.fi.get_farm_power_for_ai_factor(
             ai_factors=ai_factors,
+            yaw_angles=self.yaw_angles,
             include_unc=self.include_unc,
             unc_pmfs=self.unc_pmfs,
             unc_options=self.unc_options,
