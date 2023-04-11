@@ -5,7 +5,7 @@ from stable_baselines3.common.env_util import make_vec_env
 
 import torch
 
-from FOWFEnv import FOWFEnv
+from WFEnv import FOWFEnv
 
 from tqdm import tqdm
 import pickle

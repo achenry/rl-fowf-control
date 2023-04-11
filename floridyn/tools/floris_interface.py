@@ -214,7 +214,7 @@ class FlorisInterface(LoggerBase):
             else:
                 self.floris.farm.set_axial_induction(axial_induction)
 
-        if (any(angle_changes) or any(ai_changes))  and sim_time is not None:
+        if (any(angle_changes) or any(ai_changes)) and sim_time is not None:
 
             self.floris.farm.flow_field.calculate_wake(look_ahead=True, sim_time=sim_time, propagate_wind_speed=self.propagate_wind_speed,angle_changes=angle_changes)
 

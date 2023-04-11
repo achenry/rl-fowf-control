@@ -336,7 +336,7 @@ class Turbine(LoggerBase):
         This method sets the velocities at the turbine's rotor swept
         area grid points to zero.
         """
-        self.velocities = [0.0] * self.grid_point_count
+        self.velocities = np.array([0.0] * self.grid_point_count)
 
     def set_yaw_angle(self, yaw_angle):
         """
