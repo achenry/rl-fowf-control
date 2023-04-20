@@ -31,6 +31,7 @@ plt.ion()  # enable interactive mode
 # TODO need autoregressive inputs - not a Markov Process?
 
 # DEFINE CONSTANTS
+
 BATCH_SIZE = 128 # number of transitions sampled from the replay buffer
 GAMMA = 0.99 # discount factor
 EPS_START = 0.9 # starting value of epsilong in greedy policy action selection
@@ -46,27 +47,6 @@ Transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'reward'))
 
 
-# code to convert ini_dict to flattened dictionary
-# default separator '_'
-def convert_flatten(d, parent_key='', sep='_'):
-	items = []
-	for k, v in d.items():
-		new_key = parent_key + sep + k if parent_key else k
-		
-		if isinstance(v, MutableMapping):
-			items.extend(convert_flatten(v, new_key, sep=sep).items())
-		else:
-			items.append((new_key, v))
-	return dict(items)
-
-def convert_unflatten(d_template, arr):
-	d_unf = {}
-	for i, (k, v) in enumerate(d_template.items()):
-		if isinstance(v, Dict):
-			d_unf[k] = convert_unflatten(v, arr)
-		else:
-			d_unf[k] = arr.pop()
-	return d_unf
 
 class ReplayMemory(object):
 	""" A cyclic buffer of bounded size that holds the transitions observed recently."""
@@ -166,6 +146,8 @@ class Agent(object):
 				display.display(plt.gcf())
 	
 	def optimize_model(self):
+		
+		# fetch batch of samples from replay buffer if it is large enough
 		if len(self.memory) < BATCH_SIZE:
 			return
 		transitions = memory.sample(BATCH_SIZE)
@@ -174,6 +156,7 @@ class Agent(object):
 		batch = Transition(*zip(*transitions))
 		
 		# TODO normalize state_batch, better to do this with repmat tensor operation?
+		# normalize the next-state variables
 		next_state_batch = list(batch.next_state)
 		means = torch.tensor(self.state_mean, dtype=torch.float32)
 		stds = torch.tensor(self.state_std, dtype=torch.float32)
@@ -186,19 +169,21 @@ class Agent(object):
 		non_final_mask = torch.tensor(tuple(map(lambda s: s is not None, next_state_batch)), device=self.device, dtype=torch.bool)
 		non_final_next_states = torch.cat([s for s in batch.next_state if s is not None])
 		
-		state_batch = torch.cat(batch.state)
-		action_batch = torch.cat(batch.action)
-		reward_batch = torch.cat(batch.reward)
-		
 		# TODO normalize state_batch
+		# normalize the state variables
+		state_batch = torch.cat(batch.state)
 		for i in range(len(state_batch)):
 			state_batch[i] -= means
 			state_batch[i] /= stds
-
+			
+		action_batch = torch.cat(batch.action)
+		reward_batch = torch.cat(batch.reward)
+		
 		# Compute Q(s_t, a) - the model computes Q(s_t), then we select the
 		# columns of actions taken. These are the actions which would've been taken
-		# for each batch state according to policy_net
+		# for each batch state according to policy_net Q function
 		state_action_values = policy_net(state_batch).gather(1, action_batch)
+		# state_action_values = self.actor(state_batch).gather(1, action_batch)
 
 		# Compute V(s_{t+1}) for all next states.
 		# Expected values of actions for non_final_next_states are computed based
@@ -208,8 +193,8 @@ class Agent(object):
 		next_state_values = torch.zeros(BATCH_SIZE, device=self.device)
 		with torch.no_grad():
 			next_state_values[non_final_mask] = target_net(non_final_next_states).max(1)[0]
-		
-		# compute the expected Q values
+			
+		# compute the expected Q values using V(s_{t+1}) from target_net
 		expected_state_action_values = reward_batch + (GAMMA * next_state_values)
 		
 		# compute Huber loss
@@ -221,7 +206,8 @@ class Agent(object):
 		loss.backward()
 		
 		# in-place gradient clipping
-		torch.nn.utils.clip_grad_value_(policy_net.parameters(), 100)
+		# torch.nn.utils.clip_grad_value_(policy_net.parameters(), 100)
+		torch.nn.utils.clip_grad_value_(self.actor.parameters(), 100)
 		optimizer.step()
 
 if __name__ == '__main__':
@@ -272,6 +258,9 @@ if __name__ == '__main__':
 				print(f'{int((t * DT) / 3600)} hours passed in episode {i_episode}')
 			
 			# TODO QUESTION do we evaluate in practise by simply selecting a greedy action?
+			
+			# TODO if it is yaw sampling time, select new action, otherwise set change to 0
+			#      if it is ai_factor sampling time, select new action, otherwise set to previous value
 			action = agent.select_action(state)
 			# print(f'action.shape = {action.shape}')
 			
