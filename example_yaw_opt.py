@@ -5,6 +5,7 @@ from floridyn import tools as wfct
 from floridyn.tools.optimization.scipy.yaw import (
 	YawOptimization, AiOptimization
 )
+from floridyn.utilities import cosd
 from scipy.interpolate import NearestNDInterpolator
 from time import perf_counter as timerpc
 import pickle
@@ -20,9 +21,6 @@ WIND_SPEED_RANGE = (8, 16)
 WIND_DIR_RANGE = (250, 290)
 WIND_SPEED_VAR = 0.5
 WIND_DIR_VAR = 5
-AX_IND_FACTORS = np.array([0.11, 0.22, 0.33])
-EPS = 0.0
-YAW_ANGLES = np.array([-15, -10, -5, 0, 5, 10, 15])
 
 """
 This example demonstrates how to perform a yaw optimization for multiple wind directions and multiple wind speeds.
@@ -330,38 +328,6 @@ class Simulator:
 	def _obs(self, online_bools):
 		return {k: self._agent_obs(k, online_bools) for k in self._agent_ids}
 	
-	def _agent_obs(self, agent_idx, online_bools):
-		online_bools = np.array(online_bools)
-		
-		
-		return {
-			"obs": {
-				"layout_x":
-					[
-						coords.x1
-						for coords in self.wind_farm.floris.farm.turbine_map.coords
-					]
-				,
-				"layout_y":
-					[
-						coords.x2
-						for coords in self.wind_farm.floris.farm.turbine_map.coords
-					]
-				,
-				"ax_ind_factors":
-					[
-						self.current_ax_ind_factors
-					]
-				,
-				"yaw_angles":
-					[
-						self.current_yaw_angles
-					]
-				,
-				"online_bool": online_bools
-				# "turbine_idx": agent_idx,
-			}
-		}
 	
 	def get_action_values(self, yaw_angles, set_ax_ind_factors, online_bools):
 
@@ -379,7 +345,7 @@ if __name__ == "__main__":
 	
 	# Load FLORIS
 	fi = wfct.floris_interface.FlorisInterface(floris_dir)
-	fi.reinitialize_flow_field(wind_speed=8.0)
+	fi.reinitialize_flow_field(wind_speed=12.0)
 	nturbs = len(fi.layout_x)
 	
 	# First, get baseline AEP, without wake steering
@@ -393,7 +359,7 @@ if __name__ == "__main__":
 	# print("===========================================================")
 	# print(" ")
 	
-	OPTIMIZE = False
+	OPTIMIZE = True
 	
 	if OPTIMIZE:
 		# Now optimize the yaw angles using the Serial Refine method
@@ -410,23 +376,29 @@ if __name__ == "__main__":
 				)
 				yaw_opt = YawOptimization(
 					fi=fi,
-					minimum_yaw_angle=0.0,  # Allowable yaw angles lower bound
+					minimum_yaw_angle=-20.0,  # Allowable yaw angles lower bound
 					maximum_yaw_angle=20.0,  # Allowable yaw angles upper bound
 					include_unc=False
 				)
 		
 				yaw_angles_opt = yaw_opt.optimize()
-				
+				fi.calculate_wake(yaw_angles=yaw_angles_opt)
+				# [turbine.ai_set for turbine in fi.floris.farm.turbines]
+				# [turbine.aI for turbine in fi.floris.farm.turbines]
 				# ai_opt
-				ai_opt = AiOptimization(
-					fi=fi,
-					yaw_angles=yaw_angles_opt,
-					minimum_ai_factor=0,
-					maximum_ai_factor=0.33,
-					include_unc=False
-				)
-				
-				ai_set_opt = ai_opt.optimize()
+				# ai_opt = AiOptimization(
+				# 	fi=fi,
+				# 	yaw_angles=yaw_angles_opt,
+				# 	minimum_ai_factor=0,
+				# 	maximum_ai_factor=0.33,
+				# 	include_unc=False
+				# )
+				#
+				# ai_set_opt = ai_opt.optimize()
+				# QUESTION MISHA is this the right way to compute baseline?
+				thrust_coeffs = fi.get_turbine_ct()
+				ai_set_opt = [0.5 / cosd(yaw_angles_opt[k]) * (1 - np.sqrt(1 - thrust_coeffs[k])) for k in
+				                      range(len(fi.floris.farm.turbines))]
 				
 				end_time = timerpc()
 				t_tot = end_time - start_time

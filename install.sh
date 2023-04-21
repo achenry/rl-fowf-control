@@ -3,7 +3,9 @@
 # sinteractive --partition=aa100 --ntasks=20 --time=01:00:00 --gres=gpu:1 # for 1 gpu
 # nvidea-smi
 
-conda install python==3.8
+conda create -n rl_wf_env python=3.8
+conda activate rl_wf_env
+#conda install python==3.8
 pip install --no-cache-dir floris==2.4
 # cd floridyn
 python ./floridyn/setup.py develop

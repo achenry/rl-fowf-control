@@ -21,9 +21,6 @@ from itertools import count
 # TODO consider preview of reference power
 # TODO QUESTION to include power in observations if it is part of the reward or not - is it possible to 'overflow' observations unecessarily
 
-# TODO normalize all control actions and observations to 1 for NNs
-
-# TODO create PettingZoo MultiAgent env
 # TODO find realistic values for yaw travel limit, yaw rate of change, power tracking reference
 
 class WFEnv(ParallelEnv):
@@ -407,6 +404,7 @@ class WFEnv(ParallelEnv):
 		# include thrust force as proxy for loading in penalty
 		
 		# TODO fix scaling
+		# TODO question, if yaw angle goes out of bounds. end episode or just penalize?
 		self.farm_power = self.wind_farm.get_farm_power()
 		self.power_tracking_error = ((self.farm_power - self.power_ref_preview[self.episode_time_step]) * 1e-6)**2
 		rotor_thrust_error = (max(self.rotor_thrust) * 1e-6)**2

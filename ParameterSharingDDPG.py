@@ -24,8 +24,7 @@
 # write test loop X
 # write plot code X
 # TODO run on RC single GPU
-# TODO write RL algorithm and block diagram
-
+# TODO make baseline yaw controller
 
 import gymnasium as gym
 import math
@@ -36,7 +35,7 @@ from collections.abc import MutableMapping, Sequence
 from itertools import count
 import numpy as np
 from sklearn.preprocessing import StandardScaler
-from results import plot_durations
+from results import plot_cumulative_reward, plot_tracking_errors
 
 from gymnasium.spaces import Dict, Tuple
 
@@ -427,15 +426,15 @@ class PSDDPG(object):
         """
         Saves the state dictionaries of the actor and critic networks to files
         """
-        torch.save(self.actor.state_dict(), SAVE_DIR + 'actor.pth')
-        torch.save(self.critic.state_dict(), SAVE_DIR + 'critic.pth')
+        torch.save(self.actor.state_dict(), os.path.join(SAVE_DIR, 'actor.pth'))
+        torch.save(self.critic.state_dict(), os.path.join(SAVE_DIR, 'critic.pth'))
     
     def load(self):
         """
         Loads the state dictionaries of the actor and critic networks to files
         """
-        self.actor.load_state_dict(torch.load(SAVE_DIR + 'actor.pth'))
-        self.critic.load_state_dict(torch.load(SAVE_DIR + 'critic.pth'))
+        self.actor.load_state_dict(torch.load(os.path.join(SAVE_DIR, 'actor.pth')))
+        self.critic.load_state_dict(torch.load(os.path.join(SAVE_DIR, 'critic.pth')))
 
 def run(wf_env, agent, num_episodes, training=False, testing=False):
     trajectory = {'episode_length': [], 'power_tracking_error': [], 'farm_power': [], 'turbine_power': [],
@@ -573,7 +572,10 @@ def run(wf_env, agent, num_episodes, training=False, testing=False):
     # plot_durations(durations_t, show_result=True)
     # plt.ioff()
     # plt.show()
-    
+    if training:
+        agent.training_trajectory = trajectory
+    elif testing:
+        agent.testing_trajectory = trajectory
     return trajectory
 
 
