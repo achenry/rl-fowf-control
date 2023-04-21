@@ -131,3 +131,5 @@ dmypy.json
 .idea/
 /checkpoints
 checkpointsactor.pth checkpointscritic.pth
+checkpointsactor.pth checkpointscritic.pth
+df_opt.csv
