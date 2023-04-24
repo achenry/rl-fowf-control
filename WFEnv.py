@@ -410,6 +410,7 @@ class WFEnv(ParallelEnv):
 		rotor_thrust_error = (max(self.rotor_thrust) * 1e-6)**2
 		yaw_travel_error = (max(self.yaw_travel) / self.max_yaw_travel_thr)**2
 		
+		# TODO QUESTION how to distinguish which action led to which reward..
 		reward = {agent_id: (WEIGHTING[agent_id]['power'] * np.exp(-ALPHA[agent_id]['power'] * self.power_tracking_error)
 		         - WEIGHTING[agent_id]['rotor_thrust'] * np.exp(-ALPHA[agent_id]['rotor_thrust'] * rotor_thrust_error)
 		         - WEIGHTING[agent_id]['yaw_travel'] * np.exp(-ALPHA[agent_id]['yaw_travel'] * yaw_travel_error))
