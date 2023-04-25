@@ -11,7 +11,7 @@ from gymnasium import Env
 from collections import deque
 from Agent import YawAgent, AxIndFactorAgent
 from constants import DT, EPISODE_LEN, WIND_SPEED_RANGE, WIND_DIR_RANGE, \
-					  EPS, YAW_CHANGES, DELTA_YAW, ACTION_MAPPING, \
+					  EPS, YAW_CHANGES, DELTA_YAW, ACTION_MAPPING, YAW_LIMITS, OBSERVATION_LIMITS, AI_FACTOR_LIMITS, \
 					  YAW_ACTUATION, AI_FACTOR_ACTUATION, PTFM_ACTUATION, \
 					  ENV_CONFIG, \
 					  ALPHA, WEIGHTING, IS_DYNAMIC, N_PREVIEW_TIME_STEPS, N_PREVIOUS_TIME_STEPS
@@ -48,8 +48,14 @@ class WFEnv(ParallelEnv):
 		self.x_nom = self.wind_farm.layout_x
 		self.y_nom = self.wind_farm.layout_y
 		
-		self.agent_ids = ['yaw_angle', 'ai_factor']
-		self.agents = {'yaw_angle': YawAgent(self.n_turbines), 'ai_factor': AxIndFactorAgent(self.n_turbines)}
+		self.agent_ids = []
+		self.agents = {}
+		if YAW_ACTUATION:
+			self.agent_ids += ['yaw_angle']
+			self.agents['yaw_angle'] = YawAgent(self.n_turbines)
+		if AI_FACTOR_ACTUATION:
+			self.agent_ids += ['ai_factor']
+			self.agents['ai_factor'] = AxIndFactorAgent(self.n_turbines)
 		
 		self._action_spaces = {agent_id: agent.action_space for agent_id, agent in self.agents.items()}
 		self._observation_spaces = {agent_id: agent.observation_space for agent_id, agent in self.agents.items()}
@@ -235,11 +241,11 @@ class WFEnv(ParallelEnv):
 		self.previous_observations = {agent_id:
 			{'turbines':
 			{str(k): {
-				'online_bool': deque([init_online_bools[k]] *  N_PREVIOUS_TIME_STEPS[agent_id], maxlen=N_PREVIOUS_TIME_STEPS[agent_id]),
-				'wind_speed': deque([self.wind_farm.floris.farm.wind_speed[k]] *  N_PREVIOUS_TIME_STEPS[agent_id], maxlen=N_PREVIOUS_TIME_STEPS[agent_id]),
-				'wind_dir': deque([self.wind_farm.floris.farm.wind_direction[k]] *  N_PREVIOUS_TIME_STEPS[agent_id], maxlen=N_PREVIOUS_TIME_STEPS[agent_id]),
-				'ai_factor': deque([set_init_ax_ind_factors] * N_PREVIOUS_TIME_STEPS[agent_id], maxlen=N_PREVIOUS_TIME_STEPS[agent_id]),
-				'yaw_angle': deque([init_yaw_angles] * N_PREVIOUS_TIME_STEPS[agent_id], maxlen=N_PREVIOUS_TIME_STEPS[agent_id])
+				'online_bool': deque([init_online_bools[k]] *  N_PREVIOUS_TIME_STEPS, maxlen=N_PREVIOUS_TIME_STEPS),
+				'wind_speed': deque([self.wind_farm.floris.farm.wind_speed[k]] *  N_PREVIOUS_TIME_STEPS, maxlen=N_PREVIOUS_TIME_STEPS),
+				'wind_dir': deque([self.wind_farm.floris.farm.wind_direction[k]] *  N_PREVIOUS_TIME_STEPS, maxlen=N_PREVIOUS_TIME_STEPS),
+				'ai_factor': deque([set_init_ax_ind_factors] * N_PREVIOUS_TIME_STEPS, maxlen=N_PREVIOUS_TIME_STEPS),
+				'yaw_angle': deque([init_yaw_angles] * N_PREVIOUS_TIME_STEPS, maxlen=N_PREVIOUS_TIME_STEPS)
 			} for k in self._turbine_ids}
 		} for agent_id in self.agents}
 		
@@ -258,7 +264,7 @@ class WFEnv(ParallelEnv):
 		
 		obs = self._obs(self.wind_farm.floris.farm.wind_speed, self.wind_farm.floris.farm.wind_direction,
 		                set_init_ax_ind_factors, init_yaw_angles, init_online_bools,
-		                power=turbine_power, rotor_thrust=rotor_thrust, yaw_travel=yaw_travel)
+		                power=turbine_power, rotor_thrust=rotor_thrust, yaw_travel=yaw_travel, sampling_time=options['sampling_time'])
 		info = {}
 		return obs, info
 	
@@ -285,6 +291,8 @@ class WFEnv(ParallelEnv):
 		else:
 			yaw_angles = 270 - self.wind_farm.floris.farm.wind_direction
 		
+		# QUESTION is this the best way to clip... RL agent won't know not to increase at boundaries ...
+		yaw_angles = np.clip(yaw_angles, YAW_LIMITS[0], YAW_LIMITS[1])
 		# self.wind_farm.reinitialize_flow_field(
 		# 	wind_speed=self.mean_wind_speed,
 		# 	wind_direction=180
@@ -308,7 +316,11 @@ class WFEnv(ParallelEnv):
 			# set_ax_ind_factors = [0.5 / cosd(yaw_angles[k]) * (1 - np.sqrt(1 - thrust_coeffs[k] * cosd(yaw_angles[k])))
 			#                       for k in self._turbine_ids]
 			set_ax_ind_factors = [0.5 / cosd(yaw_angles[k]) * (1 - np.sqrt(1 - thrust_coeffs[k])) for k in self._turbine_ids]
-			
+		
+		if np.any(np.array(set_ax_ind_factors) < 0):
+			print('oh no')
+		
+		
 		effective_ax_ind_factors = np.array(
 			[
 				a if online_bool else EPS
@@ -318,7 +330,7 @@ class WFEnv(ParallelEnv):
 			
 		return yaw_angles, set_ax_ind_factors, effective_ax_ind_factors
 		
-	def step(self, action_dict):
+	def step(self, action_dict, t, sampling_time):
 		"""
         Given the yaw-angle and axial induction factor setting for each wind turbine (action) and the freestream wind speed (disturbance).
         Take a single step (one time-step) in the current episode
@@ -354,8 +366,14 @@ class WFEnv(ParallelEnv):
 					self.wind_farm.floris.farm.wind_speed[k])
 				self.previous_observations[agent_id]['turbines'][str(k)]['wind_dir'].append(
 					self.wind_farm.floris.farm.wind_direction[k])
-				self.previous_observations[agent_id]['turbines'][str(k)]['ai_factor'].append(set_new_ax_ind_factors[k])
-				self.previous_observations[agent_id]['turbines'][str(k)]['yaw_angle'].append(new_yaw_angles[k])
+				
+				# if the sampling time for ai_factor has passed, reglardless of whether ai_factor actuation is being used or not
+				if t % sampling_time['ai_factor'] == 0:
+					self.previous_observations[agent_id]['turbines'][str(k)]['ai_factor'].append(set_new_ax_ind_factors[k])
+				
+				# if the sampling time for yaw angle has passed, reglardless of whether yaw angle  actuation is being used or not
+				if t % sampling_time['yaw_angle'] == 0:
+					self.previous_observations[agent_id]['turbines'][str(k)]['yaw_angle'].append(new_yaw_angles[k])
 		
 		
 		# for agent_id, agent in self.agents.items():
@@ -394,9 +412,8 @@ class WFEnv(ParallelEnv):
 		obs = self._obs(self.wind_farm.floris.farm.wind_speed, self.wind_farm.floris.farm.wind_direction,
 		                set_new_ax_ind_factors, new_yaw_angles,
 		                online_bools=new_online_bools, power=self.turbine_power,
-		                rotor_thrust=self.rotor_thrust, yaw_travel=self.yaw_travel)
-		
-		
+		                rotor_thrust=self.rotor_thrust, yaw_travel=self.yaw_travel, sampling_time=sampling_time)
+				
 		# compute reward for each agent
 		
 		# yaw_travel
@@ -428,22 +445,28 @@ class WFEnv(ParallelEnv):
 		
 		return obs, reward, terminated, truncated, {agent_id: {} for agent_id in self.agent_ids}
 	
-	def _obs(self, wind_speed, wind_dir, set_ax_ind_factors, yaw_angles, online_bools, power, rotor_thrust, yaw_travel, loc_mag=None, loc_dir=None):
+	def _obs(self, wind_speed, wind_dir, set_ax_ind_factors, yaw_angles, online_bools, power, rotor_thrust, yaw_travel, sampling_time, loc_mag=None, loc_dir=None):
 		
 		turbine_observation = {agent_id: {str(k): {
 			'online_bool': tuple(list(self.previous_observations[agent_id]['turbines'][str(k)]['online_bool']) + [online_bools[k]]),
-			'power': power[k],
-			'wind_speed': tuple(list(self.previous_observations[agent_id]['turbines'][str(k)]['wind_speed']) + [wind_speed[k]]),
-			'wind_dir': tuple(list(self.previous_observations[agent_id]['turbines'][str(k)]['wind_dir']) + [wind_dir[k]]),
-			'yaw_angle': tuple(list(self.previous_observations[agent_id]['turbines'][str(k)]['yaw_angle']) + [yaw_angles[k]]),
-			'yaw_travel': yaw_travel[k],
-			'ai_factor': tuple(list(self.previous_observations[agent_id]['turbines'][str(k)]['ai_factor']) + [set_ax_ind_factors[k]]),
-			'rotor_thrust': rotor_thrust[k]
+			'power': power[k] / OBSERVATION_LIMITS['turbine_power'][1],
+			'wind_speed': tuple(list(self.previous_observations[agent_id]['turbines'][str(k)]['wind_speed'])
+			                    + [wind_speed[k] / OBSERVATION_LIMITS['wind_speed'][1]]),
+			'wind_dir': tuple(list(self.previous_observations[agent_id]['turbines'][str(k)]['wind_dir'])
+			                  + [wind_dir[k] / OBSERVATION_LIMITS['wind_direction'][1]]),
+			'yaw_angle': tuple(list(self.previous_observations[agent_id]['turbines'][str(k)]['yaw_angle'])
+			                   + [yaw_angles[k] / YAW_LIMITS[1]]),
+			'yaw_travel': yaw_travel[k] / YAW_LIMITS[1],
+			'ai_factor': tuple(list(self.previous_observations[agent_id]['turbines'][str(k)]['ai_factor'])
+			                   + [set_ax_ind_factors[k] / AI_FACTOR_LIMITS[1]]),
+			'rotor_thrust': rotor_thrust[k] / OBSERVATION_LIMITS['rotor_thrust'][1]
 		} for k in self._turbine_ids} for agent_id in self.agents}
 		
 		return {agent_id: {
 			"power_ref_preview": tuple(
-				self.power_ref_preview[self.episode_time_step:self.episode_time_step + N_PREVIEW_TIME_STEPS[agent_id] + 1]),
+				np.array(self.power_ref_preview[
+				self.episode_time_step:self.episode_time_step + (N_PREVIEW_TIME_STEPS * sampling_time[agent_id]) + 1:sampling_time[agent_id]])
+				/ OBSERVATION_LIMITS['turbine_power'][1]),
 			"turbines": {str(k): turbine_observation[agent_id][str(k)] for k in self._turbine_ids}
 		} for agent_id in self.agents}
 	

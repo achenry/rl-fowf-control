@@ -5,12 +5,7 @@
 # Read DDPG Paper X, Parameter Sharing Paper
 # implement parameter sharing with pytorch for Yaw and Axial Induction Factor Control with observation/control space padding and shared Actor Network
 
-# partitions: a100, single a100 (takes less time to access), ami100
-# scontrol show partitiion ami100 (less common, underutilized, not CUDA, amd equivalent
-# nvidia-smi => Memory-Usage, CUDA Version, GPU_Util
-# top -u $USER => to moniter
-# ssh c3gpu-c2-u1 => to ssh into gpu node directly
-# os.environ['CUDA_VISIBLE_DEVICES'] = 0 => use all visible devices
+
 
 # GPUs:
 # 3 GPU devices (nvidea a100s) + amd CPU with 64 CPU cores on each node => can request up to all or a third ie 21
@@ -18,7 +13,7 @@
 # code needs to tell system when to shift to GPU and back
 
 # implement mini-batch normalization X
-# TODO QUESTION how to normalize action values: -1,0,1 okay for yaw and [0,1] for ax ind factor?
+# TODO QUESTION whether to generate exploration policy by adding noise or with epsilon greedy approach?
 # checkpoint X
 # store training trajectory X
 # write test loop X
@@ -26,15 +21,14 @@
 # TODO run on RC single GPU
 # TODO make baseline yaw controller
 
-import gymnasium as gym
+
+
 import math
 import random
-from matplotlib import pyplot as plt
-from collections import namedtuple, deque
 from collections.abc import MutableMapping, Sequence
+from collections import defaultdict
 from itertools import count
 import numpy as np
-from sklearn.preprocessing import StandardScaler
 from results import plot_cumulative_reward, plot_tracking_errors
 
 from gymnasium.spaces import Dict, Tuple
@@ -47,7 +41,7 @@ import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.nn.functional as F
+# import torch.nn.functional as F
 
 from WFEnv import WFEnv
 from constants import ENV_CONFIG, DT, SAMPLING_TIME
@@ -276,8 +270,8 @@ class PSDDPG(object):
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=LR)
         
         # Shared critic to learn Q(s, a) for all agents, add 1 to include agent indicator variable
-        self.critic = Critic(self.max_n_observations + 1, self.max_n_actions, n_hidden_nodes_critic).to(device)
-        self.critic_target = Critic(self.max_n_observations + 1, self.max_n_actions, n_hidden_nodes_critic).to(device)
+        self.critic = Critic(self.max_n_observations + 1, self.max_n_actions, n_hidden_nodes_critic).to(self.device)
+        self.critic_target = Critic(self.max_n_observations + 1, self.max_n_actions, n_hidden_nodes_critic).to(self.device)
         self.critic_optimizer = {}
         self.critic_target.load_state_dict(self.critic.state_dict())
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=LR)
@@ -291,20 +285,21 @@ class PSDDPG(object):
         sample = random.random()
         eps_threshold = EPS_END + (EPS_START - EPS_END) * math.exp(-1 * self.steps_done_n[agent_id] / EPS_DECAY)
         # self.steps_done += 1
-        if sample > eps_threshold or greedy:
+        if (sample > eps_threshold) or greedy:
             with torch.no_grad():
                 # t.max(1) will return the largest column value of each row.
                 # second column on max result is index of where max element was
                 # found, so we pick action with the larger expected reward (greedy).
                 # print(f'policy_net(state).shape = {policy_net(state).shape}')
                 # TODO QUESTION also normalize agent indication function and padded zeros?
-                state[agent_id][:, :-1] \
-                    = state[agent_id][:, :-1] \
-                      - self.state_mean[:, :-1]
-                self.state_std[self.state_std == 0] = 1
-                state[agent_id][:, :-1] = state[agent_id][:, :-1] / self.state_std[:, :-1]
-                
-                return self.actor(state[agent_id]).max(0)[1].view(1, self.max_n_actions)
+                # state[agent_id][:, :-1] \
+                #     = state[agent_id][:, :-1] \
+                #       - self.state_mean[:, :-1]
+                # self.state_std[self.state_std == 0] = 1
+                # state[agent_id][:, :-1] = state[agent_id][:, :-1] / self.state_std[:, :-1]
+                action = self.actor(state[agent_id])
+                action = torch.clip(action, -1., 1.)
+                return action
         else:
             # take random sample of actions if we have not exceeded the eps_threshold for greedy action selection
             action_sample = self.env.action_space(agent_id).sample()
@@ -312,14 +307,14 @@ class PSDDPG(object):
             action_sample = [list(convert_flatten(action_sample)) + ([0] * (self.max_n_actions - self.env.n_actions[agent_id]))]
             # print(f'[env.action_space.sample()] = {action_sample}')
             
-            return torch.tensor(action_sample, device=device, dtype=self.action_type[agent_id])
+            return torch.tensor(action_sample, device=self.device, dtype=self.action_type[agent_id])
 
     def optimize_model(self):
     
         # fetch batch of samples from replay buffer if it is large enough
         if len(self.memory) < BATCH_SIZE:
             return
-        transitions = memory.sample(BATCH_SIZE)
+        transitions = self.memory.sample(BATCH_SIZE)
     
         # transpose the batch (https://stackoverflow.com/a/19343/3343043) to convert batch-arry of Transitions to Transition of batch arrays
         batch = Transition(*zip(*transitions))
@@ -328,10 +323,13 @@ class PSDDPG(object):
         # print('batch.action[0].shape', batch.action[0].shape)
         # print('batch.next_state[0].shape', batch.next_state[0].shape)
 
+        # TODO QUESTION what does this mean:
+        #  "we used batch normalization on the state input and all layers of the μ network and all layers of the Q network prior to the action input"
+        
         # normalize the next-state variables
         # exclude agent indication variable from standardization
-        means_batch = self.state_mean.repeat(BATCH_SIZE, 1)
-        stds_batch = self.state_std.repeat(BATCH_SIZE, 1)
+        # means_batch = self.state_mean.repeat(BATCH_SIZE, 1)
+        # stds_batch = self.state_std.repeat(BATCH_SIZE, 1)
 
         
         # for i in range(len(next_state_batch)):
@@ -341,10 +339,8 @@ class PSDDPG(object):
     
         # normalize the state variables
         state_batch = torch.cat(batch.state)
-        state_batch[:, :-1] \
-            = state_batch[:, :-1] - means_batch[:, :-1]
-        state_batch[:, :-1] \
-            = state_batch[:, :-1] / stds_batch[:, :-1]
+        # state_batch[:, :-1] = state_batch[:, :-1] - means_batch[:, :-1]
+        # state_batch[:, :-1] = state_batch[:, :-1] / stds_batch[:, :-1]
         # print('state_batch.shape', state_batch.shape)
         # for i in range(len(state_batch)):
         #     state_batch[i] -= means
@@ -368,12 +364,12 @@ class PSDDPG(object):
         # add 1 to include agent indicator variable
         batch_next_state_values = torch.zeros((BATCH_SIZE, self.max_n_observations + 1), device=self.device)
         batch_next_state_values[non_final_mask, :] = non_final_next_states
-        batch_next_state_values[non_final_mask, :-1] \
-            = batch_next_state_values[non_final_mask, :-1] \
-              - means_batch[non_final_mask, :-1]
-        batch_next_state_values[non_final_mask, :-1] \
-            = batch_next_state_values[non_final_mask, :-1] \
-              / stds_batch[non_final_mask, :-1]
+        # batch_next_state_values[non_final_mask, :-1] \
+        #     = batch_next_state_values[non_final_mask, :-1] \
+        #       - means_batch[non_final_mask, :-1]
+        # batch_next_state_values[non_final_mask, :-1] \
+        #     = batch_next_state_values[non_final_mask, :-1] \
+        #       / stds_batch[non_final_mask, :-1]
         
         target_Q = self.critic_target(batch_next_state_values, target_action_values)
         target_Q = reward_batch[:, None].repeat(1, self.max_n_actions) + (GAMMA * target_Q)#.detacH(
@@ -436,7 +432,7 @@ class PSDDPG(object):
         self.actor.load_state_dict(torch.load(os.path.join(SAVE_DIR, 'actor.pth')))
         self.critic.load_state_dict(torch.load(os.path.join(SAVE_DIR, 'critic.pth')))
 
-def run(wf_env, agent, num_episodes, training=False, testing=False):
+def run(wf_env, agent, num_episodes, power_ref_preview, training=False, testing=False, **kwargs):
     trajectory = {'episode_length': [], 'power_tracking_error': [], 'farm_power': [], 'turbine_power': [],
                   'rotor_thrust': [], 'yaw_travel': [],
                      'ai_factors': [], 'yaw_angles': [], 'reward_yaw_angle': [], 'reward_ai_factor': []}
@@ -445,10 +441,12 @@ def run(wf_env, agent, num_episodes, training=False, testing=False):
         print(f'Running Episode {episode_idx}')
         
         for metric in trajectory:
-            trajectory[metric].append([])
+            if metric != 'episode_length':
+                trajectory[metric].append([])
         
         # Initialize environment and get flattened, tensored state
-        observation_n, _ = wf_env.reset(seed=1, options={'power_ref_preview': power_ref_preview})
+        observation_n, _ = wf_env.reset(seed=1, options={'power_ref_preview': power_ref_preview,
+                                                         'sampling_time': SAMPLING_TIME})
         state_fl = {agent_id: convert_flatten(observation_n[agent_id])
                               + ([0] * (agent.max_n_observations - wf_env.n_observations[agent_id]))
                               + [i] for i, agent_id in enumerate(wf_env.agent_ids)}
@@ -461,26 +459,29 @@ def run(wf_env, agent, num_episodes, training=False, testing=False):
         # for each world time-step
         for t in count():
             
-            if (t * DT) % (3600 * 1) == 0:
-                print(f'{int((t * DT) / 3600)} hours passed in episode {episode_idx}')
+            if (t * kwargs['dt']) % (3600 * 1) == 0:
+                print(f'{int((t * kwargs["dt"]) / 3600)} hours passed in episode {episode_idx}')
             
-            if (t * DT) % (3600 * 6) == 0:
+            if (t * kwargs['dt']) % (3600 * 6) == 0:
                 agent.save()
             
             # set actions to none if the sampling time has not passed yet time-step for an agent
-            action_fl = {}
-            action_unf = {}
+            action_fl = defaultdict(None)
+            action_unf = defaultdict(None)
             # for each agent i
             for agent_id in wf_env.agent_ids:
                 # if it is this agent's turn to go
-                if t % SAMPLING_TIME[agent_id] == 0:
+                if t % kwargs['sampling_time'][agent_id] == 0:
                     # input the padded observation for this agent to the shared policy network mu(s),
                     # trimming if necessary for different sized action spaces
                     # to get the action for this agent
                     action_fl[agent_id] = agent.select_action(state_fl, agent_id, greedy=testing)
+
+                    if np.any(np.isnan(action_fl[agent_id].tolist()[0])):
+                        print('oh no')
                     
                     # trim acions
-                    action_fl_ls = action_fl[agent_id].squeeze().tolist()[:wf_env.n_actions[agent_id]]
+                    action_fl_ls = action_fl[agent_id].cpu().tolist()[0][:wf_env.n_actions[agent_id]]
                     
                     # convert flattened action back to dict form for env step method
                     if type(wf_env.action_space(agent_id)) is Dict:
@@ -498,7 +499,7 @@ def run(wf_env, agent, num_episodes, training=False, testing=False):
             # print('action.shape', action.shape)
             
             # step the env forward
-            observation_n, reward_n, terminated_n, truncated_n, _ = wf_env.step(action_unf)
+            observation_n, reward_n, terminated_n, truncated_n, _ = wf_env.step(action_unf, t, kwargs['sampling_time'])
 
             trajectory['farm_power'][episode_idx].append(wf_env.farm_power)
             trajectory['power_tracking_error'][episode_idx].append(wf_env.power_tracking_error)
@@ -507,8 +508,9 @@ def run(wf_env, agent, num_episodes, training=False, testing=False):
             trajectory['yaw_travel'][episode_idx].append(tuple(wf_env.yaw_travel))
             trajectory['ai_factors'][episode_idx].append(tuple(wf_env.eff_ai_factors))
             trajectory['yaw_angles'][episode_idx].append(tuple(wf_env.yaw_angles))
-            trajectory['reward_yaw_angle'][episode_idx].append(reward_n['yaw_angle'])
-            trajectory['reward_ai_factor'][episode_idx].append(reward_n['ai_factor'])
+            
+            for agent_id in wf_env.agent_ids:
+                trajectory[f'reward_{agent_id}'][episode_idx].append(reward_n[agent_id])
 
             # print('observation.shape', np.array(observation['yaw_angle']).shape)
             
@@ -526,7 +528,9 @@ def run(wf_env, agent, num_episodes, training=False, testing=False):
                         observation_fl[agent_id] = convert_flatten(observation_n[agent_id]) \
                                                    + ([0] * (agent.max_n_observations - wf_env.n_observations[agent_id])) \
                                                    + [i]
-                        
+                        if np.any(np.isnan(observation_fl[agent_id])):
+                            print('oh no')
+                            
                         if terminated_n[agent_id]:
                             next_state_fl[agent_id] = None
                         else:
@@ -537,7 +541,9 @@ def run(wf_env, agent, num_episodes, training=False, testing=False):
                         # TODO QUESTION will the fact that the 'objective' (ie reward function) differs for different agents be a problem with parameter sharing
                         # TODO QUESTION could it be problematic if we collect the reward and observations after both yaw and angle act?
                         # store the transition for this agent in memory
-                        agent.memory.push(state_fl[agent_id], action_fl[agent_id], next_state_fl[agent_id], reward_fl)
+                        agent.memory.push(state_fl[agent_id],
+                                          action_fl[agent_id],
+                                          next_state_fl[agent_id], reward_fl)
                         
                         # Move to the next state
                         state_fl[agent_id] = next_state_fl[agent_id]
@@ -549,6 +555,7 @@ def run(wf_env, agent, num_episodes, training=False, testing=False):
                         agent.soft_update()
                         
                         # maintain running average of mean and standard deviation to use for batch normalization
+                        
                         agent.state_mean = agent.state_mean + ((state_fl[agent_id] - agent.state_mean) / agent.steps_done)
                         
                         agent.state_std = (agent.state_std ** 2 + (
@@ -618,7 +625,13 @@ if __name__ == '__main__':
 
     # Create a DDPG instance
     agent = PSDDPG(wf_env, device, memory)
+   
+    # TODO which to cpu for calls to step
     
-    run(wf_env, agent, num_training_episodes, training=True)
+    training_trajectory = run(wf_env, agent, num_training_episodes, power_ref_preview, dt=DT, sampling_time=SAMPLING_TIME, training=True)
+    np.save(os.path.join('./trajectories', 'training_trajectory'), training_trajectory)
+    np.load(os.path.join('./trajectories', 'training_trajectory'))
+    plot_cumulative_reward(training_trajectory, ['yaw_angle'])
+    plot_tracking_errors(training_trajectory, wf_env.n_turbines)
     
-    run(wf_env, agent, num_testing_episodes, testing=True)
+    testing_trajectory = run(wf_env, agent, num_testing_episodes, power_ref_preview, dt=DT, sampling_time=SAMPLING_TIME, testing=True)

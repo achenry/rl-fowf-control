@@ -11,16 +11,19 @@ if is_ipython:
 
 plt.ion()
 
-def plot_cumulative_reward(trajectory):
+def plot_cumulative_reward(trajectory, agent_ids):
 	# plot mean cumulative reward per time step during training # TODO what is mean cumulative reward?
 	
-	fig, ax = plt.subplots(2, 1)
+	fig, axs = plt.subplots(len(agent_ids), 1)
 	# for each episode tested
 	for episode_idx in range(len(trajectory['episode_length'])):
-		ax[0].scatter(trajectory['episode_length'][episode_idx], np.cumsum(trajectory['reward_yaw_angle'][episode_idx]))
-		ax[0].set(title="Yaw Angle Agent Reward")
-		ax[1].scatter(trajectory['episode_length'][episode_idx], np.cumsum(trajectory['reward_ai_factor'][episode_idx]))
-		ax[1].set(title="Axial Induction Factor Agent Reward", xlabel='Episode Time-Step')
+		if len(agent_ids) == 1:
+			ax = [axs]
+		
+		for i, agent_id in enumerate(agent_ids):
+			ax[i].scatter(trajectory['episode_length'][episode_idx], np.cumsum(trajectory[f'reward_{agent_id}'][episode_idx]))
+			ax[i].set(title=f"{' '.join([str.capitalize() for str in agent_id.split('_')])} Agent Reward")
+			
 	fig.show()
 
 def plot_tracking_errors(trajectory, n_turbines):
