@@ -133,3 +133,5 @@ dmypy.json
 checkpointsactor.pth checkpointscritic.pth
 checkpointsactor.pth checkpointscritic.pth
 df_opt.csv
+runs/
+trajectories/

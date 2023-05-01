@@ -11,7 +11,7 @@
 # os.environ['CUDA_VISIBLE_DEVICES'] = 0 => use all visible devices
 # sinteractive --partition=ami100 --ntasks=20 --time=01:00:00 --gres=gpu:1
 
-conda create -n rl_wf_env python=3.8
+conda create -n rl_wf_env
 conda activate rl_wf_env
 #conda install python==3.8
 pip install --no-cache-dir floris==2.4
@@ -23,8 +23,23 @@ pip install --no-cache-dir torch
 pip install --no-cache-dir gymnasium
 pip install --no-cache-dir scikit-learn
 pip install --no-cache-dir dm_tree
+python -m pip install tensorflow-macos
+conda install tensorflow
 #pip install --no-cache-dir ray[rllib]
 #pip install --no-cache-dir ray[tune]
 pip install --no-cache-dir gputil
-pip install --no-cache-dir pettingzoo
-pip install --no-cached-dir lightning
+#pip install --no-cache-dir pettingzoo
+#pip install --no-cached-dir lightning
+pip install --no-cached-dir wandb
+# pip install stable-baselines3 # need version compatible with gymnasium
+cd stable-baselines3
+python setup.py develop
+#conda install pybullet_envs
+conda install pytorch torchvision torchaudio cudatoolkit=11.6 -c pytorch -c conda-forge
+# uninstall existing tensorflow-macos and tensorflow-metal
+#python -m pip uninstall tensorflow-macos
+#python -m pip uninstall tensorflow-metal
+# Upgrade tensorflow-deps
+#conda install -c apple tensorflow-deps --force-reinstall
+# or point to specific conda environment
+#conda install -c apple tensorflow-deps --force-reinstall -n rl_wf_env

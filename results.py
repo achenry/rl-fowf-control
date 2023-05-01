@@ -3,47 +3,47 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+import pandas as pd
+import os
+import torch
+import pickle
 
 # set up matplotlib
-is_ipython = 'inline' in matplotlib.get_backend()
-if is_ipython:
-	from IPython import display
+# is_ipython = 'inline' in matplotlib.get_backend()
+# if is_ipython:
+# 	from IPython import display
 
 plt.ion()
 
 def plot_cumulative_reward(trajectory, agent_ids):
 	# plot mean cumulative reward per time step during training # TODO what is mean cumulative reward?
 	
-	fig, axs = plt.subplots(len(agent_ids), 1)
+	fig, ax = plt.subplots(1, 1)
 	# for each episode tested
 	for episode_idx in range(len(trajectory['episode_length'])):
-		if len(agent_ids) == 1:
-			ax = [axs]
-		
-		for i, agent_id in enumerate(agent_ids):
-			ax[i].scatter(trajectory['episode_length'][episode_idx], np.cumsum(trajectory[f'reward_{agent_id}'][episode_idx]))
-			ax[i].set(title=f"{' '.join([str.capitalize() for str in agent_id.split('_')])} Agent Reward")
+		ax.scatter(np.arange(trajectory['episode_length'][episode_idx]), np.cumsum(trajectory[f'reward'][episode_idx]))
+		ax.set(title=f"Reward")
 			
 	fig.show()
 
 def plot_tracking_errors(trajectory, n_turbines):
 	# plot the power, yaw_travel, rotor_thrust tracking error per time-step during training/evaluation
 	fig, ax = plt.subplots(3, 1)
-	
 	# for each episode tested
 	for episode_idx in range(len(trajectory['episode_length'])):
-		ax[0].scatter(trajectory['episode_length'][episode_idx], trajectory['power_tracking_error'][episode_idx])
+		ax[0].scatter(np.arange(trajectory['episode_length'][episode_idx]), trajectory['power_tracking_error'][episode_idx])
 		ax[0].set(title="Farm Power Tracking Error")
 		
 		for k in range(n_turbines):
-			ax[1].scatter(trajectory['episode_length'][episode_idx], [ls[k] for ls in trajectory['yaw_travel'][episode_idx]], label=f'Turbine {k}')
+			ax[1].scatter(np.arange(trajectory['episode_length'][episode_idx]), [ls[k] for ls in trajectory['yaw_travel'][episode_idx]], label=f'Turbine {k}')
 		ax[1].set(title="Yaw Travel", xlabel='Episode Time-Step')
-		ax[1].legend()
+		# ax[1].legend()
 		
 		for k in range(n_turbines):
-			ax[1].scatter(trajectory['episode_length'][episode_idx], [ls[k] for ls in trajectory['rotor_thrust'][episode_idx]], label=f'Turbine {k}')
-		ax[1].set(title="Rotor Thrust", xlabel='Episode Time-Step')
-		ax[1].legend()
+			ax[2].scatter(np.arange(trajectory['episode_length'][episode_idx]), [ls[k] for ls in trajectory['rotor_thrust'][episode_idx]], label=f'Turbine {k}')
+		ax[2].set(title="Rotor Thrust", xlabel='Episode Time-Step')
+		ax[2].legend()
 	
 	fig.show()
 
@@ -85,9 +85,21 @@ def plot_durations(durations_t, show_result=False):
 		plt.plot(means.numpy())
 	
 	plt.pause(0.001)  # pause a bit so that plots are updated
-	if is_ipython:
-		if not show_result:
-			display.display(plt.gcf())
-			display.clear_output(wait=True)
-		else:
-			display.display(plt.gcf())
+	# if is_ipython:
+	# 	if not show_result:
+	# 		display.display(plt.gcf())
+	# 		display.clear_output(wait=True)
+	# 	else:
+	# 		display.display(plt.gcf())
+			
+if __name__ == '__main__':
+	# tensorboard --logdir=runs
+	# event_acc = EventAccumulator("runs/trajectory", size_guidance={'tensors': 0})
+	#
+	# pd.DataFrame([(w, s, t.to_numpy()) for w, s, t in event_acc.Tensors('my_metric')], 2, \
+	# 	columns = ['wall_time', 'step', 'tensor'])
+	# training_trajectory = np.load(os.path.join('./trajectories', 'training_trajectory.pickle'), allow_pickle=True)
+	with open(os.path.join('./trajectories', 'training_trajectory.pickle'), 'rb') as handle:
+		training_trajectory = pickle.load(handle)
+	plot_tracking_errors(training_trajectory, 9)
+	plot_cumulative_reward(training_trajectory, ['yaw_angle'])

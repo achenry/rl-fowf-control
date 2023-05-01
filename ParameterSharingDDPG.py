@@ -13,15 +13,15 @@
 # code needs to tell system when to shift to GPU and back
 
 # implement mini-batch normalization X
-# TODO QUESTION whether to generate exploration policy by adding noise or with epsilon greedy approach?
+# TODO generate exploration policy by adding noise with clipping
+# TODO normalize at inputs
 # checkpoint X
 # store training trajectory X
 # write test loop X
 # write plot code X
 # TODO run on RC single GPU
-# TODO make baseline yaw controller
 
-
+# TODO optimize code using library using cleanRL (https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/ddpg_continuous_action.py)
 
 import math
 import random
@@ -287,17 +287,11 @@ class PSDDPG(object):
         # self.steps_done += 1
         if (sample > eps_threshold) or greedy:
             with torch.no_grad():
-                # t.max(1) will return the largest column value of each row.
-                # second column on max result is index of where max element was
-                # found, so we pick action with the larger expected reward (greedy).
-                # print(f'policy_net(state).shape = {policy_net(state).shape}')
-                # TODO QUESTION also normalize agent indication function and padded zeros?
-                # state[agent_id][:, :-1] \
-                #     = state[agent_id][:, :-1] \
-                #       - self.state_mean[:, :-1]
-                # self.state_std[self.state_std == 0] = 1
-                # state[agent_id][:, :-1] = state[agent_id][:, :-1] / self.state_std[:, :-1]
                 action = self.actor(state[agent_id])
+                # DDPG is for continuous action spaces
+                #   include previous yaw angle in state
+                #   or penalize 'bad' action with clipping
+                #   or choose action corresponding to highest Q value that is valid in DQN
                 action = torch.clip(action, -1., 1.)
                 return action
         else:
@@ -322,9 +316,6 @@ class PSDDPG(object):
         # print('batch.state[0].shape', batch.state[0].shape)
         # print('batch.action[0].shape', batch.action[0].shape)
         # print('batch.next_state[0].shape', batch.next_state[0].shape)
-
-        # TODO QUESTION what does this mean:
-        #  "we used batch normalization on the state input and all layers of the μ network and all layers of the Q network prior to the action input"
         
         # normalize the next-state variables
         # exclude agent indication variable from standardization
@@ -357,7 +348,7 @@ class PSDDPG(object):
         # compute target policy mu' for y_t target computation, for non-final states (otherwise zero action)
         target_action_values = torch.zeros((BATCH_SIZE, self.max_n_actions), device=self.device)
         # Context-manager that disabled gradient calculation, when we know we will not call Tensor.backward()
-        with torch.no_grad(): # TODO QUESTION do I need this
+        with torch.no_grad(): # don't need this bc not using target networks for backpropagation (where we need gradient)
             target_action_values[non_final_mask, :] = self.actor_target(non_final_next_states)
     
         # Compute the shared target Q-function from next state, s', values in replay buffer, and target mu' action values
@@ -447,12 +438,12 @@ def run(wf_env, agent, num_episodes, power_ref_preview, training=False, testing=
         # Initialize environment and get flattened, tensored state
         observation_n, _ = wf_env.reset(seed=1, options={'power_ref_preview': power_ref_preview,
                                                          'sampling_time': SAMPLING_TIME})
-        state_fl = {agent_id: convert_flatten(observation_n[agent_id])
+        state = {agent_id: observation_n[agent_id]
                               + ([0] * (agent.max_n_observations - wf_env.n_observations[agent_id]))
                               + [i] for i, agent_id in enumerate(wf_env.agent_ids)}
         
         # print(f'state.shape = {state.shape}')
-        state_fl = {agent_id: torch.tensor(state_fl[agent_id], dtype=torch.float32, device=agent.device).unsqueeze(0)
+        state = {agent_id: torch.tensor(observation_n[agent_id], dtype=torch.float16, device=agent.device).unsqueeze(0)
                     for agent_id in wf_env.agent_ids}
         # print(f'tensor state.shape = {state.shape}')
         
@@ -466,8 +457,8 @@ def run(wf_env, agent, num_episodes, power_ref_preview, training=False, testing=
                 agent.save()
             
             # set actions to none if the sampling time has not passed yet time-step for an agent
-            action_fl = defaultdict(None)
-            action_unf = defaultdict(None)
+            action = defaultdict(None)
+            # action_unf = defaultdict(None)
             # for each agent i
             for agent_id in wf_env.agent_ids:
                 # if it is this agent's turn to go
@@ -475,31 +466,22 @@ def run(wf_env, agent, num_episodes, power_ref_preview, training=False, testing=
                     # input the padded observation for this agent to the shared policy network mu(s),
                     # trimming if necessary for different sized action spaces
                     # to get the action for this agent
-                    action_fl[agent_id] = agent.select_action(state_fl, agent_id, greedy=testing)
+                    action[agent_id] = agent.select_action(state, agent_id, greedy=testing)
 
-                    if np.any(np.isnan(action_fl[agent_id].tolist()[0])):
+                    if np.any(np.isnan(action[agent_id].tolist()[0])):
                         print('oh no')
                     
-                    # trim acions
-                    action_fl_ls = action_fl[agent_id].cpu().tolist()[0][:wf_env.n_actions[agent_id]]
-                    
-                    # convert flattened action back to dict form for env step method
-                    if type(wf_env.action_space(agent_id)) is Dict:
-                        action_unf[agent_id] = convert_unflatten(wf_env.action_space(agent_id), action_fl_ls)
-                    else:
-                        action_unf[agent_id] = action_fl_ls
+                    # trim actions
+                    # action[agent_id] = action[agent_id][:wf_env.n_actions[agent_id]]
                     
                     agent.steps_done += 1
                     agent.steps_done_n[agent_id] += 1
-                else:
-                    action_fl[agent_id] = None
-                    action_unf[agent_id] = None
             
             # print(f'action.shape = {action.shape}')
             # print('action.shape', action.shape)
             
             # step the env forward
-            observation_n, reward_n, terminated_n, truncated_n, _ = wf_env.step(action_unf, t, kwargs['sampling_time'])
+            observation_n, reward_n, terminated_n, truncated_n, _ = wf_env.step(action)
 
             trajectory['farm_power'][episode_idx].append(wf_env.farm_power)
             trajectory['power_tracking_error'][episode_idx].append(wf_env.power_tracking_error)
@@ -514,52 +496,49 @@ def run(wf_env, agent, num_episodes, power_ref_preview, training=False, testing=
 
             # print('observation.shape', np.array(observation['yaw_angle']).shape)
             
-            # TODO is the below only considered in training? what about batch normalization
+            # TODO what about single-agent, or single-agent per neighbourhood, would need to constrain yaw changes in between sample times
+            
+            # TODO make non-Markovian state space Markovian by including previous states, or using RNN
+            
+            # TODO is the below only considered in training?
             if training:
                 # for each agent i
-                next_state_fl = {}
-                observation_fl = {}
+                next_state = {}
+                # observation = {}
                 for i, agent_id in enumerate(wf_env.agent_ids):
                     # if it is this agent's turn to go
                     if t % SAMPLING_TIME[agent_id] == 0:
-                        reward_fl = torch.tensor([reward_n[agent_id]], device=agent.device)
+                        reward = torch.tensor([reward_n[agent_id]], device=agent.device)
                         
                         # pad shorter observation with zeros and with identity of agent
-                        observation_fl[agent_id] = convert_flatten(observation_n[agent_id]) \
-                                                   + ([0] * (agent.max_n_observations - wf_env.n_observations[agent_id])) \
-                                                   + [i]
-                        if np.any(np.isnan(observation_fl[agent_id])):
+                        observation_n[agent_id] = observation_n[agent_id] \
+                                                  + ([0] * (agent.max_n_observations - wf_env.n_observations[agent_id])) \
+                                                    + [i]
+                        if np.any(np.isnan(observation_n[agent_id])):
                             print('oh no')
                             
                         if terminated_n[agent_id]:
-                            next_state_fl[agent_id] = None
+                            next_state[agent_id] = None
                         else:
-                            next_state_fl[agent_id] = torch.tensor(observation_fl[agent_id], dtype=torch.float32,
+                            next_state[agent_id] = torch.tensor(observation_n[agent_id], dtype=torch.float32,
                                                                    device=agent.device).unsqueeze(0)
                             # print(f'next_state.shape = {next_state.shape}')
                         
                         # TODO QUESTION will the fact that the 'objective' (ie reward function) differs for different agents be a problem with parameter sharing
-                        # TODO QUESTION could it be problematic if we collect the reward and observations after both yaw and angle act?
+                        # TODO QUESTION could it be problematic if we collect the reward and observations after both yaw and angle act? => not if we include previous yaw/ai factors in state
                         # store the transition for this agent in memory
-                        agent.memory.push(state_fl[agent_id],
-                                          action_fl[agent_id],
-                                          next_state_fl[agent_id], reward_fl)
+                        agent.memory.push(state[agent_id],
+                                          action[agent_id],
+                                          next_state[agent_id], reward)
                         
                         # Move to the next state
-                        state_fl[agent_id] = next_state_fl[agent_id]
+                        state[agent_id] = next_state[agent_id]
                         
                         # perform one step of the optimization (on the policy network)
                         agent.optimize_model()
                         
                         # Soft update target networks for critic and actor
                         agent.soft_update()
-                        
-                        # maintain running average of mean and standard deviation to use for batch normalization
-                        
-                        agent.state_mean = agent.state_mean + ((state_fl[agent_id] - agent.state_mean) / agent.steps_done)
-                        
-                        agent.state_std = (agent.state_std ** 2 + (
-                            (state_fl[agent_id] - agent.state_mean) ** 2 - agent.state_std ** 2) / agent.steps_done) ** 0.5
             
             # print(f'observation.shape = {observation.shape}')
             done = all(terminated_n.values()) or all(truncated_n.values())
