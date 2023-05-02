@@ -1,4 +1,18 @@
 import os
+import sys
+import torch
+
+if sys.platform == 'darwin':
+    project_dir = '/Users/aoifework/Documents/Research/rl_fowf_control/rl-fowf-control/'
+elif sys.platform == 'linux':
+    project_dir = f'/scratch/alpine/aohe7145/rl_wf_control/'
+
+SAVE_DIR = os.path.join(project_dir, 'data')
+FIG_DIR = os.path.join(project_dir, 'figs')
+
+for dir in [SAVE_DIR, FIG_DIR]:
+    if not os.path.exists(dir):
+        os.makedirs(dir)
 
 YAW_CHANGES = [-1, 0, 1]
 YAW_LIMITS = [-30, 30]
@@ -63,7 +77,7 @@ WEIGHTING = {'yaw_angle': {'power': 1, 'rotor_thrust': 0, 'yaw_travel': 0*0.5},
          }
 
 TURBINE_ALPHA = {'power': 1e-3, 'rotor_thrust': 1e-2, 'yaw_travel': 1e-2}
-TURBINE_WEIGHTING = {'power': 1, 'rotor_thrust': 0, 'yaw_travel': 0*0.5}
+TURBINE_WEIGHTING = {'power': 1, 'rotor_thrust': 0.1, 'yaw_travel': 0.1}
 
 # ACTION_MAPPING = {'yaw_angle': lambda k: {0: -1, 0.5: 0, 1: 1}[k], 'ai_factor': lambda k: k * 1/3}
 # ACTION_MAPPING = {'yaw_angle': lambda k: k, 'ai_factor': lambda k: (k + 1) * 1/6}
@@ -73,3 +87,13 @@ n_turbines = 9
 OBSERVATION_RANGE = {'wind_speed': WIND_SPEED_RANGE, 'wind_dir': WIND_DIR_RANGE, 'ai_factor': AI_FACTOR_LIMITS,
                       'turbine_power': (0, 5e6),'rotor_thrust': (0, 5e6), 'yaw_angle': YAW_LIMITS,
                      'yaw_travel': (0, ENV_CONFIG['max_yaw_travel_thr']), 'farm_power': (0, 5e6 * n_turbines)}
+
+LEARNING_ENDS = int(24 * 60 * 60 // DT)
+
+if torch.cuda.is_available():
+	print('CUDA is available')
+	N_TRAINING_EPISODES = 100
+	N_TESTING_EPISODES = 10
+else:
+	N_TRAINING_EPISODES = 5
+	N_TESTING_EPISODES = 1

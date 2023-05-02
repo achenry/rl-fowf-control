@@ -1,4 +1,7 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/ddpg/#ddpg_continuous_actionpy
+# sinteractive --partition=ami100 --ntasks=20 --gres=gpu:1 --time=30:00:00
+# rocm-smi
+# seff [job_id]
 import argparse
 import os
 import random
@@ -19,23 +22,11 @@ from torch.utils.tensorboard import SummaryWriter
 import pickle
 
 from TurbineEnv import MultiTurbineEnv
-from constants import ENV_CONFIG, EPISODE_LEN, DT, SAMPLING_TIME, YAW_ACTUATION, AI_FACTOR_ACTUATION
-from results import plot_cumulative_reward, plot_tracking_errors
+from constants import ENV_CONFIG, EPISODE_LEN, DT, SAMPLING_TIME, YAW_ACTUATION, AI_FACTOR_ACTUATION, LEARNING_ENDS, \
+    SAVE_DIR, N_TRAINING_EPISODES, N_TESTING_EPISODES
 
 TORCH_NUMERICAL_TYPE = torch.float32
 NUMPY_NUMERICAL_TYPE = np.float32
-
-if sys.platform == 'darwin':
-    project_dir = '/Users/aoifework/Documents/Research/rl_fowf_control/rl-fowf-control/'
-elif sys.platform == 'linux':
-    project_dir = f'/scratch/alpine/aohe7145/rl_wf_control/'
-
-SAVE_DIR = os.path.join(project_dir, 'checkpoints')
-FIG_DIR = os.path.join(project_dir, 'figs')
-
-for dir in [SAVE_DIR, FIG_DIR]:
-    if not os.path.exists(dir):
-        os.makedirs(dir)
 
 # Transition = namedtuple('Transition',
 #                         ('state', 'action', 'next_state', 'reward'))
@@ -83,6 +74,8 @@ def parse_args():
         help="the scale of exploration noise")
     parser.add_argument("--learning-starts", type=int, default=0, #25e3,
         help="timestep to start learning")
+    parser.add_argument("--learning-ends", type=int, default=LEARNING_ENDS,  # 6 hours
+                        help="timestep to stop learning")
     parser.add_argument("--policy-frequency", type=int, default=2, # QUESTION what is this
         help="the frequency of training policy (delayed)")
     parser.add_argument("--noise-clip", type=float, default=0.5,
@@ -180,14 +173,6 @@ if __name__ == "__main__":
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
-    
-    if torch.cuda.is_available():
-        print('CUDA is available')
-        num_training_episodes = 100
-        num_testing_episodes = 1
-    else:
-        num_training_episodes = 1
-        num_testing_episodes = 1
         
     # env setup
     # env = gym.vector.SyncVectorEnv([make_env(args.env_id, args.seed, 0, args.capture_video, run_name)])
@@ -217,10 +202,13 @@ if __name__ == "__main__":
     
     trajectory = {'episode_length': [], 'power_tracking_error': [], 'farm_power': [], 'turbine_power': [],
                   'rotor_thrust': [], 'yaw_travel': [],
-                  'ai_factors': [], 'yaw_angles': [], 'reward': []}
+                  'ai_factors': [], 'yaw_angles': [],
+                  'power_tracking_reward': [], 'rotor_thrust_reward': [], 'yaw_travel_reward': [], 'total_reward': []}
     
     # TRY NOT TO MODIFY: start the game
-    for episode_idx in range(num_training_episodes):
+    global_step = 0
+    for episode_idx in range(N_TRAINING_EPISODES + N_TESTING_EPISODES):
+        tic = time.perf_counter()
         print(f'Running Episode {episode_idx}')
         
         for metric in trajectory:
@@ -231,14 +219,11 @@ if __name__ == "__main__":
                                   'sampling_time': SAMPLING_TIME})
         previous_actions = info['init_action']
         
-        for global_step in range(args.total_timesteps):
+        for local_step in range(EPISODE_LEN):
             
-            if (global_step * DT) % (3600 * 1) == 0:
-                print(f'{int((global_step * DT) / 3600)} hours passed in episode {episode_idx}')
+            if (local_step * DT) % (3600 * 1) == 0:
+                print(f'{int((local_step * DT) / 3600)} hours passed in episode {episode_idx}')
             
-            # TODO
-            # if (t * kwargs['dt']) % (3600 * 6) == 0:
-            #     agent.save()
             
             actions = defaultdict(None)
             for agent_id in env.agent_ids:
@@ -249,18 +234,21 @@ if __name__ == "__main__":
                 else:
                     with torch.no_grad():
                         actions[agent_id] = actor(torch.Tensor(obs[agent_id]).to(device))
-                        actions[agent_id] += torch.normal(0, actor.action_scale * args.exploration_noise)
+                        # add noise if we are training, not when testing
+                        # if global_step < args.learning_ends:
+                        if episode_idx < N_TRAINING_EPISODES:
+                            actions[agent_id] += torch.normal(0, actor.action_scale * args.exploration_noise)
                         actions[agent_id] = actions[agent_id].cpu().numpy().clip(env.action_space.low, env.action_space.high)
                         
                     # trim actions
                     # actions[agent_id] = actions[agent_id][:env.n_agent_actions[agent_id]]
                     
-                # if it is not this agent's turn to go, set to last value TODO test
+                # if it is not this agent's turn to go, set to last value
                 actuation_idx = 0
-                if YAW_ACTUATION and global_step % SAMPLING_TIME['yaw_angle'] != 0:
+                if YAW_ACTUATION and local_step % SAMPLING_TIME['yaw_angle'] != 0:
                     actions[agent_id][actuation_idx] = previous_actions[agent_id][actuation_idx]
                     actuation_idx += 1
-                if AI_FACTOR_ACTUATION and global_step % SAMPLING_TIME['ai_factor'] != 0:
+                if AI_FACTOR_ACTUATION and local_step % SAMPLING_TIME['ai_factor'] != 0:
                     actions[agent_id][actuation_idx] = previous_actions[agent_id][actuation_idx]
                 
             # TRY NOT TO MODIFY: execute the game and log data.
@@ -273,7 +261,10 @@ if __name__ == "__main__":
             trajectory['yaw_travel'][episode_idx].append(tuple(env.yaw_travel))
             trajectory['ai_factors'][episode_idx].append(tuple(env.eff_ai_factors))
             trajectory['yaw_angles'][episode_idx].append(tuple(env.yaw_angles))
-            trajectory['reward'][episode_idx].append(rewards)
+            trajectory['power_tracking_reward'][episode_idx].append(env.reward['power_tracking'])
+            trajectory['rotor_thrust_reward'][episode_idx].append(env.reward['rotor_thrust'])
+            trajectory['yaw_travel_reward'][episode_idx].append(env.reward['yaw_travel'])
+            trajectory['total_reward'][episode_idx].append(rewards)
             
             # TRY NOT TO MODIFY: record rewards for plotting purposes
             # for info in infos:
@@ -334,9 +325,11 @@ if __name__ == "__main__":
                     writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
         
         # writer.add_scalar(f"trajectory/episode-{episode_idx}/episode_length", global_step + 1, global_step)
-        trajectory['episode_length'].append(global_step + 1)
+        trajectory['episode_length'].append(local_step + 1)
+        toc = time.perf_counter()
+        print(f'Epsiode {episode_idx} ran in {toc - tic:0.4f} seconds.')
     
-    with open(os.path.join(SAVE_DIR, 'training_trajectory.pickle'), 'wb') as handle:
+    with open(os.path.join(SAVE_DIR, f'trajectory_{run_name}.pickle'), 'wb') as handle:
         pickle.dump(trajectory, handle, protocol=pickle.HIGHEST_PROTOCOL)
         
     env.close()

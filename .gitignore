@@ -129,9 +129,11 @@ dmypy.json
 .pyre/
 .DS_STORE
 .idea/
-/checkpoints
+/data
 checkpointsactor.pth checkpointscritic.pth
 checkpointsactor.pth checkpointscritic.pth
 df_opt.csv
 runs/
 trajectories/
+data/
+figs?

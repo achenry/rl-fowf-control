@@ -9,6 +9,8 @@ import os
 import torch
 import pickle
 
+from constants import SAVE_DIR, FIG_DIR, LEARNING_ENDS, N_TRAINING_EPISODES, N_TESTING_EPISODES
+
 # set up matplotlib
 # is_ipython = 'inline' in matplotlib.get_backend()
 # if is_ipython:
@@ -16,35 +18,92 @@ import pickle
 
 plt.ion()
 
-def plot_cumulative_reward(trajectory, agent_ids):
+# def get_testing_episodes(trajectory):
+# 	# find first index in which episode idx comprises all testing data
+# 	return np.where(LEARNING_ENDS >= np.cumsum(trajectory['episode_length']))[0]
+# 	# # for each episode run
+# 	# for ep_length in trajectory['episode_length']:
+# 	# 	testing_trajectory_start += min(ep_length, LEARNING_ENDS - testing_trajectory_start)
+
+def plot_cumulative_reward(trajectory, reward_types, episode_indices):
 	# plot mean cumulative reward per time step during training # TODO what is mean cumulative reward?
 	
 	fig, ax = plt.subplots(1, 1)
 	# for each episode tested
-	for episode_idx in range(len(trajectory['episode_length'])):
-		ax.scatter(np.arange(trajectory['episode_length'][episode_idx]), np.cumsum(trajectory[f'reward'][episode_idx]))
-		ax.set(title=f"Reward")
+	for ep_idx in episode_indices:
+		if ep_idx not in episode_indices:
+			continue
+		for rt in reward_types:
+			ax.plot(np.arange(trajectory['episode_length'][ep_idx]), np.cumsum(trajectory[f'{rt}_reward'][ep_idx]),
+			        label=f"{' '.join([s.capitalize() for s in rt.split('_')])}", linestyle='--')
+		ax.plot(np.arange(trajectory['episode_length'][ep_idx]), np.cumsum(trajectory[f'total_reward'][ep_idx]),
+			        label=f"{' '.join([s.capitalize() for s in rt.split('_')])}", linestyle='-')
+		ax.set(title=f"Cumulative Reward")
 			
 	fig.show()
 
-def plot_tracking_errors(trajectory, n_turbines):
-	# plot the power, yaw_travel, rotor_thrust tracking error per time-step during training/evaluation
-	fig, ax = plt.subplots(3, 1)
+
+def plot_state_trajectory(trajectory, states, episode_indices, agent_indices):
+	# plot mean cumulative reward per time step during training
+	
+	fig, axs = plt.subplots(len(states), 1, sharex=True)
+	if len(states) == 1:
+		axs = [axs]
 	# for each episode tested
-	for episode_idx in range(len(trajectory['episode_length'])):
-		ax[0].scatter(np.arange(trajectory['episode_length'][episode_idx]), trajectory['power_tracking_error'][episode_idx])
+	for ep_idx in episode_indices:
+		if ep_idx not in episode_indices:
+			continue
+		for i, s in enumerate(states):
+			data = [[all_agent_data[i] for i in agent_indices] for all_agent_data in trajectory[s][ep_idx]]
+			axs[i].plot(np.arange(trajectory['episode_length'][ep_idx]), data,
+			        label=f"{' '.join([x.capitalize() for x in s.split('_')])}")
+			axs[i].set(title=f"{' '.join([x.capitalize() for x in s.split('_')])} Trajectory")
+	
+	fig.show()
+def plot_inst_reward(trajectory, reward_types, episode_indices):
+	# plot mean cumulative reward per time step during training
+	
+	fig, axs = plt.subplots(len(reward_types) + 1, 1, sharex=True)
+	if len(reward_types) == 0:
+		axs = [axs]
+		
+	# for each episode tested
+	for ep_idx in episode_indices:
+		if ep_idx not in episode_indices:
+			continue
+		for i, rt in enumerate(reward_types):
+			label = f"{' '.join([s.capitalize() for s in rt.split('_')])}"
+			axs[i].plot(np.arange(trajectory['episode_length'][ep_idx]), trajectory[f'{rt}_reward'][ep_idx],
+			        label=label, linestyle='--')
+			axs[i].set(title=f"Instantaneous {label} Reward")
+		axs[-1].plot(np.arange(trajectory['episode_length'][ep_idx]), trajectory[f'total_reward'][ep_idx],
+		        label="Total Reward", linestyle='-')
+		axs[-1].set(title=f"Instantaneous Total Reward")
+		
+	
+	fig.show()
+
+def plot_tracking_errors(trajectory, episode_indices, agent_indices):
+	# plot the power, yaw_travel, rotor_thrust tracking error per time-step during training/evaluation
+	fig, ax = plt.subplots(3, 1, sharex=True)
+	# for each episode tested
+	for ep_idx in episode_indices:
+		if ep_idx not in episode_indices:
+			continue
+			
+		ax[0].plot(np.arange(trajectory['episode_length'][ep_idx]), trajectory['power_tracking_error'][ep_idx])
 		ax[0].set(title="Farm Power Tracking Error")
 		
-		for k in range(n_turbines):
-			ax[1].scatter(np.arange(trajectory['episode_length'][episode_idx]), [ls[k] for ls in trajectory['yaw_travel'][episode_idx]], label=f'Turbine {k}')
+		for k in agent_indices:
+			ax[1].plot(np.arange(trajectory['episode_length'][ep_idx]), [ls[k] for ls in trajectory['yaw_travel'][ep_idx]], label=f'Turbine {k}')
 		ax[1].set(title="Yaw Travel", xlabel='Episode Time-Step')
 		# ax[1].legend()
 		
-		for k in range(n_turbines):
-			ax[2].scatter(np.arange(trajectory['episode_length'][episode_idx]), [ls[k] for ls in trajectory['rotor_thrust'][episode_idx]], label=f'Turbine {k}')
+		for k in agent_indices:
+			ax[2].plot(np.arange(trajectory['episode_length'][ep_idx]), [ls[k] for ls in trajectory['rotor_thrust'][ep_idx]], label=f'Turbine {k}')
 		ax[2].set(title="Rotor Thrust", xlabel='Episode Time-Step')
 		ax[2].legend()
-	
+		
 	fig.show()
 
 def plot_wind_farm(system_fi):
@@ -99,7 +158,21 @@ if __name__ == '__main__':
 	# pd.DataFrame([(w, s, t.to_numpy()) for w, s, t in event_acc.Tensors('my_metric')], 2, \
 	# 	columns = ['wall_time', 'step', 'tensor'])
 	# training_trajectory = np.load(os.path.join('./trajectories', 'training_trajectory.pickle'), allow_pickle=True)
-	with open(os.path.join('./trajectories', 'training_trajectory.pickle'), 'rb') as handle:
-		training_trajectory = pickle.load(handle)
-	plot_tracking_errors(training_trajectory, 9)
-	plot_cumulative_reward(training_trajectory, ['yaw_angle'])
+	# multi_turbine_env-v0__CleanRL_PSDDPG__1__1683043106
+	run_env_id = 'multi_turbine_env-v0'
+	run_exp_name = 'CleanRL_PSDDPG'
+	run_seed = 1
+	run_time = 1683055949
+	run_name = f"{run_env_id}__{run_exp_name}__{run_seed}__{run_time}.pickle"
+	with open(os.path.join(SAVE_DIR, 'trajectories', run_name), 'rb') as handle:
+		trajectory = pickle.load(handle)
+	
+	# testing_episode_idx = get_testing_episodes(trajectory)
+	testing_episode_idx = np.arange(N_TRAINING_EPISODES, N_TRAINING_EPISODES + N_TESTING_EPISODES)
+	testing_episode_idx = [0]
+	agent_idx = [0]
+	plot_state_trajectory(trajectory, ['yaw_angles', 'ai_factors'], testing_episode_idx, agent_idx)
+	plot_tracking_errors(trajectory, testing_episode_idx, agent_idx)
+	plot_inst_reward(trajectory, ['power_tracking', 'rotor_thrust', 'yaw_travel'], testing_episode_idx)
+	# plot_inst_reward(trajectory, [], testing_episode_idx)
+	plot_cumulative_reward(trajectory, ['power_tracking', 'rotor_thrust', 'yaw_travel'], testing_episode_idx)

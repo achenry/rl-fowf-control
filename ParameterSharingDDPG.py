@@ -64,7 +64,7 @@ if sys.platform == 'darwin':
 elif sys.platform == 'linux':
     project_dir = f'/scratch/alpine/aohe7145/rl_wf_control/'
 
-SAVE_DIR = os.path.join(project_dir, 'checkpoints')
+SAVE_DIR = os.path.join(project_dir, 'data')
 FIG_DIR = os.path.join(project_dir, 'figs')
 
 for dir in [SAVE_DIR, FIG_DIR]:
