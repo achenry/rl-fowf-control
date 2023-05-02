@@ -443,9 +443,9 @@ class MultiTurbineEnv(ParallelEnv):
 		#                      - TURBINE_WEIGHTING['yaw_travel'] * np.exp(
 		# 		-TURBINE_ALPHA['yaw_travel'] * yaw_travel_error))
 		#           for agent_id in self.agent_ids}
-		self.reward = {'power_tracking': -TURBINE_WEIGHTING['power'] * np.exp(-TURBINE_ALPHA['power'] * self.power_tracking_error),
-		               'rotor_thrust': -TURBINE_WEIGHTING['rotor_thrust'] * np.exp(-TURBINE_ALPHA['rotor_thrust'] * rotor_thrust_error),
-						'yaw_travel': -TURBINE_WEIGHTING['yaw_travel'] * np.exp(-TURBINE_ALPHA['yaw_travel'] * yaw_travel_error)}
+		self.reward = {'power_tracking': TURBINE_WEIGHTING['power'] * np.exp(-TURBINE_ALPHA['power'] * self.power_tracking_error),
+		               'rotor_thrust': TURBINE_WEIGHTING['rotor_thrust'] * np.exp(-TURBINE_ALPHA['rotor_thrust'] * rotor_thrust_error),
+						'yaw_travel': TURBINE_WEIGHTING['yaw_travel'] * np.exp(-TURBINE_ALPHA['yaw_travel'] * yaw_travel_error)}
 		
 		reward = self.reward['power_tracking'] + self.reward['rotor_thrust'] + self.reward['yaw_travel']
 		
