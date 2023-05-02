@@ -32,10 +32,10 @@ pip install --no-cache-dir gputil
 #pip install --no-cached-dir lightning
 pip install --no-cached-dir wandb
 # pip install stable-baselines3 # need version compatible with gymnasium
-cd stable-baselines3
-python setup.py develop
+#cd stable-baselines3
+#python setup.py develop
 #conda install pybullet_envs
-conda install pytorch torchvision torchaudio cudatoolkit=11.6 -c pytorch -c conda-forge
+#conda install pytorch torchvision torchaudio cudatoolkit=11.6 -c pytorch -c conda-forge
 # uninstall existing tensorflow-macos and tensorflow-metal
 #python -m pip uninstall tensorflow-macos
 #python -m pip uninstall tensorflow-metal

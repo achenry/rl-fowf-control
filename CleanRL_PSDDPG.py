@@ -167,7 +167,7 @@ if __name__ == "__main__":
             monitor_gym=True,
             save_code=True,
         )
-    writer = SummaryWriter(f"runs/{run_name}")
+    writer = SummaryWriter(log_dir=os.path.join(SAVE_DIR, f"runs/{run_name}"))
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
@@ -274,14 +274,6 @@ if __name__ == "__main__":
             trajectory['ai_factors'][episode_idx].append(tuple(env.eff_ai_factors))
             trajectory['yaw_angles'][episode_idx].append(tuple(env.yaw_angles))
             trajectory['reward'][episode_idx].append(rewards)
-            # writer.add_scalar(f"trajectory/episode-{episode_idx}/farm_power",env.farm_power, global_step)
-            # writer.add_scalar(f"trajectory/episode-{episode_idx}/power_tracking_error", env.power_tracking_error, global_step)
-            # writer.add_scalar(f"trajectory/episode-{episode_idx}/turbine_power", env.turbine_power, global_step)
-            # writer.add_scalar(f"trajectory/episode-{episode_idx}/rotor_thrust", tuple(env.rotor_thrust), global_step)
-            # writer.add_scalar(f"trajectory/episode-{episode_idx}/yaw_travel", tuple(env.yaw_travel), global_step)
-            # writer.add_scalar(f"trajectory/episode-{episode_idx}/ai_factors", tuple(env.eff_ai_factors), global_step)
-            # writer.add_scalar(f"trajectory/episode-{episode_idx}/yaw_angles", tuple(env.yaw_angles), global_step)
-            # writer.add_scalar(f"trajectory/episode-{episode_idx}/reward", rewards, global_step)
             
             # TRY NOT TO MODIFY: record rewards for plotting purposes
             # for info in infos:
@@ -344,7 +336,7 @@ if __name__ == "__main__":
         # writer.add_scalar(f"trajectory/episode-{episode_idx}/episode_length", global_step + 1, global_step)
         trajectory['episode_length'].append(global_step + 1)
     
-    with open('./trajectories/training_trajectory.pickle', 'wb') as handle:
+    with open(os.path.join(SAVE_DIR, 'training_trajectory.pickle'), 'wb') as handle:
         pickle.dump(trajectory, handle, protocol=pickle.HIGHEST_PROTOCOL)
         
     env.close()
